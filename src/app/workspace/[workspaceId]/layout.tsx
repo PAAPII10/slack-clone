@@ -15,8 +15,11 @@ import { Loader } from "lucide-react";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { Thread } from "@/features/messages/components/Thread";
 import { Profile } from "@/features/members/components/Profile";
+import { useGlobalNotifications } from "@/hooks/use-global-notifications";
 
 export default function WorkspaceIdLayout({ children }: PropsWithChildren) {
+  // Global notifications for all workspace messages
+  useGlobalNotifications();
   const { parentMessageId, profileMemberId, onCloseMessage, onCloseProfile } =
     usePanel();
 

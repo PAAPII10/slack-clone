@@ -372,3 +372,72 @@ export const messageById = query({
     };
   },
 });
+
+/**
+ * Get recent messages for notifications
+ * Returns messages from the workspace that the current user should be notified about
+ */
+export const getRecentForNotifications = query({
+  args: {
+    workspaceId: v.id("workspaces"),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+
+    if (!userId) {
+      return [];
+    }
+
+    const currentMember = await getMember(ctx, args.workspaceId, userId);
+
+    if (!currentMember) {
+      return [];
+    }
+
+    const limit = args.limit ?? 50;
+
+    // Get all recent messages in the workspace
+    const allMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_workspace_id", (q) => q.eq("workspaceId", args.workspaceId))
+      .order("desc")
+      .take(limit * 2); // Get more to filter out user's own messages
+
+    // Filter out messages sent by the current user and thread replies
+    const relevantMessages = allMessages.filter(
+      (message) =>
+        message.memberId !== currentMember._id && !message.parentMessageId
+    );
+
+    // Take only the limit
+    const messages = relevantMessages.slice(0, limit);
+
+    // Populate user info for notifications
+    const messagesWithUsers = await Promise.all(
+      messages.map(async (message) => {
+        const member = await populateMember(ctx, message.memberId);
+        const user = member ? await populateUser(ctx, member.userId) : null;
+
+        if (!member || !user) {
+          return null;
+        }
+
+        return {
+          _id: message._id,
+          body: message.body,
+          memberId: message.memberId,
+          channelId: message.channelId,
+          conversationId: message.conversationId,
+          _creationTime: message._creationTime,
+          user: {
+            name: user.name,
+            image: user.image,
+          },
+        };
+      })
+    );
+
+    return messagesWithUsers.filter((msg) => msg !== null);
+  },
+});

@@ -17,6 +17,8 @@ import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { useConfirm } from "@/hooks/use-confirm";
+import { SoundSettings } from "@/components/SoundSettings";
+import { useCurrentMember } from "@/features/members/api/use-current-member";
 
 interface PreferencesModalProps {
   open: boolean;
@@ -29,8 +31,11 @@ export function PreferencesModal({
   setOpen,
   initialValue,
 }: PreferencesModalProps) {
-  const workspaceId = useWorkspaceId();
   const router = useRouter();
+  const workspaceId = useWorkspaceId();
+  const { data: currentMember } = useCurrentMember({
+    workspaceId: workspaceId!,
+  });
   const [value, setValue] = useState(initialValue);
   const [isEditing, setIsEditing] = useState(false);
   const [ConfirmDialog, confirm] = useConfirm({
@@ -88,16 +93,18 @@ export function PreferencesModal({
           </DialogHeader>
           <div className="px-4 pb-4 flex flex-col gap-y-2">
             <Dialog open={isEditing} onOpenChange={setIsEditing}>
-              <DialogTrigger asChild>
-                <div className="px-5 py-4 bg-white rounded-lg border cursor-pointer hover:bg-gray-50">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold">Workspace name</p>
-                    <p className="text-sm text-[#1264a3] hover:underline font-semibold">
-                      Edit
-                    </p>
+              <DialogTrigger asChild disabled={currentMember?.role !== "admin"}>
+                {currentMember?.role === "admin" && (
+                  <div className="px-5 py-4 bg-white rounded-lg border cursor-pointer hover:bg-gray-50">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold">Workspace name</p>
+                      <p className="text-sm text-[#1264a3] hover:underline font-semibold">
+                        Edit
+                      </p>
+                    </div>
+                    <p className="text-sm">{value}</p>
                   </div>
-                  <p className="text-sm">{value}</p>
-                </div>
+                )}
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
@@ -125,14 +132,17 @@ export function PreferencesModal({
                 </form>
               </DialogContent>
             </Dialog>
-            <button
-              disabled={isRemovingWorkspace}
-              onClick={handleRemove}
-              className="flex items-center gap-x-2 py-4 px-5 bg-white rounded-lg cursor-pointer border hover:border-gray-50 text-rose-600"
-            >
-              <TrashIcon className="size-4" />
-              <p className="text-sm font-semibold">Delete workspace</p>
-            </button>
+            <SoundSettings />
+            {currentMember?.role === "admin" && (
+              <button
+                disabled={isRemovingWorkspace}
+                onClick={handleRemove}
+                className="flex items-center gap-x-2 py-4 px-5 bg-white rounded-lg cursor-pointer border hover:border-gray-50 text-rose-600"
+              >
+                <TrashIcon className="size-4" />
+                <p className="text-sm font-semibold">Delete workspace</p>
+              </button>
+            )}
           </div>
         </DialogContent>
       </Dialog>

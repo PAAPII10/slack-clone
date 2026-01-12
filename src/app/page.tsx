@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect } from "react";
-import { UserButton } from "@/features/auth/components/UserButton";
 import { useCreateWorkspaceModal } from "@/features/workspaces/store/useCreateWorkspaceModal";
 import { useGetWorkspaces } from "@/features/workspaces/api/use-get-workspaces";
 import { useRouter } from "next/navigation";

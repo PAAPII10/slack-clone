@@ -70,14 +70,14 @@ export function WorkspaceHeader({ workspace, isAdmin }: WorkspaceHeaderProps) {
                 >
                   Invite people to {workspace.name}
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer py-2"
-                  onClick={() => setPreferencesOpen(true)}
-                >
-                  Preferences
-                </DropdownMenuItem>
               </>
             ) : null}
+            <DropdownMenuItem
+              className="cursor-pointer py-2"
+              onClick={() => setPreferencesOpen(true)}
+            >
+              Preferences
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <div className="flex items-center gap-0.5">

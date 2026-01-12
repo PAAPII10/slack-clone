@@ -55,6 +55,22 @@ const schema = defineSchema({
     .index("by_workspace_id", ["workspaceId"])
     .index("by_message_id", ["messageId"])
     .index("by_member_id", ["memberId"]),
+  memberPreferences: defineTable({
+    memberId: v.id("members"),
+    workspaceId: v.id("workspaces"),
+    soundType: v.union(
+      v.literal("default"),
+      v.literal("chime"),
+      v.literal("bell"),
+      v.literal("pop"),
+      v.literal("ding"),
+      v.literal("slack")
+    ),
+    volume: v.number(),
+    enabled: v.boolean(),
+  })
+    .index("by_member_id", ["memberId"])
+    .index("by_workspace_id", ["workspaceId"]),
 });
 
 export default schema;

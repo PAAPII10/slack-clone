@@ -1,6 +1,56 @@
 import { v } from "convex/values";
-import { mutation } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
+
+export const getByMembers = query({
+  args: {
+    workspaceId: v.id("workspaces"),
+    memberId: v.id("members"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+
+    if (!userId) {
+      return null;
+    }
+
+    const currentMember = await ctx.db
+      .query("members")
+      .withIndex("by_workspace_id_user_id", (q) =>
+        q.eq("workspaceId", args.workspaceId).eq("userId", userId)
+      )
+      .unique();
+
+    if (!currentMember) {
+      return null;
+    }
+
+    const otherMember = await ctx.db.get(args.memberId);
+
+    if (!otherMember) {
+      return null;
+    }
+
+    const conversation = await ctx.db
+      .query("conversations")
+      .filter((q) => q.eq(q.field("workspaceId"), args.workspaceId))
+      .filter((q) =>
+        q.or(
+          q.and(
+            q.eq(q.field("memberOneId"), currentMember._id),
+            q.eq(q.field("memberTwoId"), otherMember._id)
+          ),
+          q.and(
+            q.eq(q.field("memberOneId"), otherMember._id),
+            q.eq(q.field("memberTwoId"), currentMember._id)
+          )
+        )
+      )
+      .first();
+
+    return conversation?._id ?? null;
+  },
+});
 
 export const createOrGet = mutation({
   args: {

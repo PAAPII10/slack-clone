@@ -15,6 +15,7 @@ import { useGenerateUploadUrl } from "@/features/upload/api/use-generate-upload-
 import { useChannelId } from "@/hooks/use-channel-id";
 import { useGetMessages } from "../api/use-get-messages";
 import { differenceInMinutes, format, isToday, isYesterday } from "date-fns";
+import { useNotificationSound } from "@/hooks/use-notification-sound";
 
 const Editor = dynamic(() => import("@/components/Editor"), {
   ssr: false,
@@ -49,6 +50,13 @@ export function Thread({ messageId, onClose }: ThreadProps) {
 
   const canLoadMore = status === "CanLoadMore";
   const isLoadingMore = status === "LoadingMore";
+
+  // Play notification sound for new messages in thread
+  useNotificationSound({
+    messages: results,
+    currentMemberId: currentMember?._id,
+    enabled: true,
+  });
 
   const { mutate: generateUploadUrl } = useGenerateUploadUrl();
 

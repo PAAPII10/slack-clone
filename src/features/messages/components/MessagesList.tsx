@@ -9,6 +9,7 @@ import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { useCurrentMember } from "@/features/members/api/use-current-member";
 import { Loader } from "lucide-react";
 import { ConversationHero } from "@/features/conversation/components/ConversationHero";
+import { useNotificationSound } from "@/hooks/use-notification-sound";
 
 const TIME_THRESHOLD = 5; // in minutes
 
@@ -40,6 +41,13 @@ export function MessagesList({
   const [editingId, setEditingId] = useState<Id<"messages"> | null>(null);
 
   const { data: currentMember } = useCurrentMember({ workspaceId });
+
+  // Play notification sound for new messages
+  useNotificationSound({
+    messages: data,
+    currentMemberId: currentMember?._id,
+    enabled: true,
+  });
 
   const groupedMessage = data?.reduce((groups, message) => {
     const date = new Date(message._creationTime);
