@@ -117,12 +117,64 @@ export default function Editor({
     quill.setContents(defaultValueRef.current);
     setText(quill.getText());
 
+    // Handle image paste from clipboard
+    const handlePaste = (e: Event) => {
+      const clipboardEvent = e as ClipboardEvent;
+      const items = clipboardEvent.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.indexOf("image") !== -1) {
+          clipboardEvent.preventDefault();
+          clipboardEvent.stopPropagation();
+          const blob = item.getAsFile();
+          if (blob) {
+            // Convert blob to File object
+            const file = new File([blob], `pasted-image-${Date.now()}.png`, {
+              type: blob.type || "image/png",
+            });
+            setImage(file);
+          }
+          return;
+        }
+      }
+    };
+
+    // Listen to paste event on the editor element (use capture phase to intercept before Quill)
+    const editorElement = editorContainer.querySelector(".ql-editor") as HTMLElement | null;
+    if (editorElement) {
+      editorElement.addEventListener("paste", handlePaste, true);
+    }
+
+    // Also handle text-change to remove any images that might have been inserted
+    const handleTextChange = () => {
+      const delta = quill.getContents();
+      const hasImage = delta.ops?.some(
+        (op: Op) => op.insert && typeof op.insert === "object" && "image" in op.insert
+      );
+      if (hasImage) {
+        // Remove image ops and keep only text
+        const filteredOps = delta.ops?.filter(
+          (op: Op) => !(op.insert && typeof op.insert === "object" && "image" in op.insert)
+        );
+        if (filteredOps && filteredOps.length !== delta.ops?.length) {
+          quill.setContents(filteredOps);
+        }
+      }
+    };
+
     quill.on(Quill.events.TEXT_CHANGE, () => {
       setText(quill.getText());
+      handleTextChange();
     });
 
     return () => {
       quill.off(Quill.events.TEXT_CHANGE);
+      const editorElement = editorContainer.querySelector(".ql-editor") as HTMLElement | null;
+      if (editorElement) {
+        editorElement.removeEventListener("paste", handlePaste, true);
+      }
       if (container) {
         container.innerHTML = "";
       }
