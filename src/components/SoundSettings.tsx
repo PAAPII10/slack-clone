@@ -3,12 +3,18 @@
 import { useSoundPreferences } from "@/hooks/use-sound-preferences";
 import { getAvailableSounds, playNotificationSound } from "@/lib/sound-manager";
 import { Button } from "@/components/ui/button";
-import { Volume2, VolumeX, Play } from "lucide-react";
+import { Volume2, VolumeX, Play, Bell, BellOff } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 
 export function SoundSettings() {
-  const { preferences, isLoading, setSoundType, setVolume, setEnabled } =
-    useSoundPreferences();
+  const {
+    preferences,
+    isLoading,
+    setSoundType,
+    setVolume,
+    setEnabled,
+    setBrowserNotificationsEnabled,
+  } = useSoundPreferences();
   const availableSounds = getAvailableSounds();
 
   const handleTestSound = () => {
@@ -112,6 +118,36 @@ export function SoundSettings() {
         >
           <Play className="size-4" />
           Test Sound
+        </Button>
+      </div>
+
+      <Separator />
+
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold">Browser Notifications</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Show desktop notifications for new messages
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() =>
+            setBrowserNotificationsEnabled(!preferences.browserNotificationsEnabled)
+          }
+          title={
+            preferences.browserNotificationsEnabled
+              ? "Disable browser notifications"
+              : "Enable browser notifications"
+          }
+          disabled={isLoading}
+        >
+          {preferences.browserNotificationsEnabled ? (
+            <Bell className="size-4" />
+          ) : (
+            <BellOff className="size-4" />
+          )}
         </Button>
       </div>
     </div>

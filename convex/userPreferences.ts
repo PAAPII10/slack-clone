@@ -1,7 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { Id } from "./_generated/dataModel";
 
 export const get = query({
   args: {
@@ -37,6 +36,7 @@ export const get = query({
         soundType: "default" as const,
         volume: 0.5,
         enabled: true,
+        browserNotificationsEnabled: false,
       };
     }
 
@@ -44,6 +44,8 @@ export const get = query({
       soundType: preferences.soundType,
       volume: preferences.volume,
       enabled: preferences.enabled,
+      browserNotificationsEnabled:
+        preferences.browserNotificationsEnabled ?? false,
     };
   },
 });
@@ -63,6 +65,7 @@ export const update = mutation({
     ),
     volume: v.optional(v.number()),
     enabled: v.optional(v.boolean()),
+    browserNotificationsEnabled: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
@@ -98,6 +101,7 @@ export const update = mutation({
       soundType?: typeof args.soundType;
       volume?: number;
       enabled?: boolean;
+      browserNotificationsEnabled?: boolean;
     } = {};
 
     if (args.soundType !== undefined) {
@@ -108,6 +112,9 @@ export const update = mutation({
     }
     if (args.enabled !== undefined) {
       updates.enabled = args.enabled;
+    }
+    if (args.browserNotificationsEnabled !== undefined) {
+      updates.browserNotificationsEnabled = args.browserNotificationsEnabled;
     }
 
     if (existing) {
@@ -121,6 +128,7 @@ export const update = mutation({
         soundType: args.soundType ?? "default",
         volume: args.volume ?? 0.5,
         enabled: args.enabled ?? true,
+        browserNotificationsEnabled: args.browserNotificationsEnabled ?? false,
       };
       return await ctx.db.insert("memberPreferences", newPreferences);
     }

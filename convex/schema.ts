@@ -68,6 +68,8 @@ const schema = defineSchema({
     ),
     volume: v.number(),
     enabled: v.boolean(),
+    browserNotificationsEnabled: v.optional(v.boolean()),
+    desktopNotificationsEnabled: v.optional(v.boolean()),
   })
     .index("by_member_id", ["memberId"])
     .index("by_workspace_id", ["workspaceId"]),

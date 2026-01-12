@@ -16,6 +16,7 @@ type RequestType = {
   soundType?: SoundType;
   volume?: number;
   enabled?: boolean;
+  browserNotificationsEnabled?: boolean;
 };
 
 type ResponseType = string; // Returns the preference ID

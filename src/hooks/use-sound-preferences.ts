@@ -8,12 +8,14 @@ export interface SoundPreferences {
   soundType: SoundType;
   volume: number; // 0.0 to 1.0
   enabled: boolean;
+  browserNotificationsEnabled: boolean;
 }
 
 const DEFAULT_PREFERENCES: SoundPreferences = {
   soundType: "default",
   volume: 0.5,
   enabled: true,
+  browserNotificationsEnabled: false,
 };
 
 /**
@@ -48,6 +50,11 @@ export function useSoundPreferences() {
     updatePreferencesMutation({ workspaceId, enabled });
   };
 
+  const setBrowserNotificationsEnabled = (browserNotificationsEnabled: boolean) => {
+    if (!workspaceId) return;
+    updatePreferencesMutation({ workspaceId, browserNotificationsEnabled });
+  };
+
   const updatePreferences = (updates: Partial<SoundPreferences>) => {
     if (!workspaceId) return;
     updatePreferencesMutation({ workspaceId, ...updates });
@@ -59,6 +66,7 @@ export function useSoundPreferences() {
     setSoundType,
     setVolume,
     setEnabled,
+    setBrowserNotificationsEnabled,
     updatePreferences,
   };
 }

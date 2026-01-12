@@ -9,6 +9,7 @@ import { useCurrentMember } from "@/features/members/api/use-current-member";
 import { useChannelId } from "@/hooks/use-channel-id";
 import { useMemberId } from "@/hooks/use-member-id";
 import { useGetConversation } from "@/features/conversation/api/use-get-conversation";
+import { extractPlainTextFromQuill } from "@/lib/utils";
 
 /**
  * Global notification hook that monitors all messages in the workspace
@@ -94,8 +95,12 @@ export function useGlobalNotifications() {
           playNotificationSound(soundPrefs.soundType, soundPrefs.volume);
         }
 
-        // Show browser notification
-        if (typeof window !== "undefined" && "Notification" in window) {
+        // Show browser notification (only if enabled in preferences)
+        if (
+          soundPrefs?.browserNotificationsEnabled &&
+          typeof window !== "undefined" &&
+          "Notification" in window
+        ) {
           // Request permission if not already granted
           if (Notification.permission === "default") {
             Notification.requestPermission();
@@ -103,9 +108,14 @@ export function useGlobalNotifications() {
             const title = message.channelId
               ? `New message in channel`
               : `${message.user.name}`;
-            const body = message.body.length > 100
-              ? message.body.substring(0, 100) + "..."
-              : message.body;
+            
+            // Extract plain text from Quill Delta JSON
+            const plainText = extractPlainTextFromQuill(message.body);
+            const body = plainText
+              ? plainText.length > 100
+                ? plainText.substring(0, 100) + "..."
+                : plainText
+              : "New message";
 
             new Notification(title, {
               body,
