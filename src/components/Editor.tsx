@@ -136,6 +136,42 @@ export default function Editor({
     quill.setContents(defaultValueRef.current);
     setText(quill.getText());
 
+    // URL detection regex - matches http, https, www, and common domains
+    const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9-]+\.[a-zA-Z]{2,}[^\s]*)/g;
+
+    // Function to detect and convert URLs to links
+    const convertUrlsToLinks = () => {
+      const text = quill.getText();
+      
+      // Find all URLs in the text
+      const matches = Array.from(text.matchAll(urlRegex));
+      
+      if (matches.length === 0) return;
+      
+      // Process matches in reverse order to maintain correct indices
+      matches.reverse().forEach((match) => {
+        if (!match.index && match.index !== 0) return;
+        
+        const startIndex = match.index;
+        const endIndex = startIndex + match[0].length;
+        
+        // Check if this range already has a link format
+        const format = quill.getFormat(startIndex, endIndex - startIndex);
+        if (format.link) return; // Already a link, skip
+        
+        // Get the URL text
+        const urlText = match[0];
+        // Ensure URL has protocol
+        let url = urlText;
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+          url = "https://" + url;
+        }
+        
+        // Apply link format
+        quill.formatText(startIndex, endIndex - startIndex, "link", url, "user");
+      });
+    };
+
     // Handle image paste from clipboard
     const handlePaste = (e: Event) => {
       const clipboardEvent = e as ClipboardEvent;
@@ -191,9 +227,18 @@ export default function Editor({
       }
     };
 
-    quill.on(Quill.events.TEXT_CHANGE, () => {
+    quill.on(Quill.events.TEXT_CHANGE, (_delta, _oldDelta, source) => {
       setText(quill.getText());
       handleTextChange();
+      
+      // Convert URLs to links when user types (not when programmatically changed)
+      if (source === "user") {
+        // Use setTimeout to allow the text to be inserted first
+        setTimeout(() => {
+          convertUrlsToLinks();
+        }, 0);
+      }
+      
       // Emit typing start event when user types
       if (variant === "create" && onTypingStartRef.current) {
         onTypingStartRef.current();
@@ -218,7 +263,7 @@ export default function Editor({
         innerRef.current = null;
       }
     };
-  }, [innerRef]);
+  }, [innerRef, variant]);
 
   const toggleToolbar = () => {
     setIsToolbarVisible((prev) => !prev);
