@@ -63,7 +63,9 @@ export const get = query({
     // Get all conversations for this workspace
     const conversations = await ctx.db
       .query("conversations")
-      .withIndex("by_workspace_id", (q) => q.eq("workspaceId", args.workspaceId))
+      .withIndex("by_workspace_id", (q) =>
+        q.eq("workspaceId", args.workspaceId)
+      )
       .collect();
 
     // Build a map of memberId -> conversationId for conversations involving current member
@@ -260,8 +262,11 @@ export const remove = mutation({
     ]);
 
     for (const message of messages) {
-      if (message.image) {
-        await ctx.storage.delete(message.image);
+      // Delete all attachments
+      if (message.attachments) {
+        for (const attachmentId of message.attachments) {
+          await ctx.storage.delete(attachmentId);
+        }
       }
       await ctx.db.delete(message._id);
     }

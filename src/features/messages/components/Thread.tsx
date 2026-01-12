@@ -27,7 +27,7 @@ type CreateMessageValue = {
   channelId: Id<"channels">;
   workspaceId: Id<"workspaces">;
   body: string;
-  image?: Id<"_storage">;
+  attachments?: Id<"_storage">[];
   parentMessageId: Id<"messages">;
 };
 
@@ -68,7 +68,7 @@ export function Thread({ messageId, onClose }: ThreadProps) {
 
   const { mutate: createMessage } = useCreateMessage();
 
-  const onSubmit = async ({ image, body }: EditorValue) => {
+  const onSubmit = async ({ attachments, body }: EditorValue) => {
     try {
       setIsPending(true);
       editorRef.current?.enable(false);
@@ -77,32 +77,37 @@ export function Thread({ messageId, onClose }: ThreadProps) {
         body,
         workspaceId,
         channelId,
-        image: undefined,
+        attachments: undefined,
         parentMessageId: messageId,
       };
 
-      if (image) {
-        const uploadUrl = await generateUploadUrl({ throwError: true });
+      if (attachments && attachments.length > 0) {
+        // Upload all files
+        const storageIds: Id<"_storage">[] = [];
+        for (const attachment of attachments) {
+          const uploadUrl = await generateUploadUrl({ throwError: true });
 
-        if (!uploadUrl) {
-          throw new Error("Url not found");
+          if (!uploadUrl) {
+            throw new Error("Url not found");
+          }
+
+          const result = await fetch(uploadUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": attachment.type,
+            },
+            body: attachment,
+          });
+
+          if (!result.ok) {
+            throw new Error("Failed to upload file");
+          }
+
+          const { storageId } = await result.json();
+          storageIds.push(storageId);
         }
 
-        const result = await fetch(uploadUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": image.type,
-          },
-          body: image,
-        });
-
-        if (!result.ok) {
-          throw new Error("Failed to upload image");
-        }
-
-        const { storageId } = await result.json();
-
-        values.image = storageId;
+        values.attachments = storageIds;
       }
 
       await createMessage(values, {
@@ -200,7 +205,7 @@ export function Thread({ messageId, onClose }: ThreadProps) {
                   isAuthor={message.memberId === currentMember?._id}
                   reactions={message.reactions}
                   body={message.body}
-                  image={message.image}
+                  attachments={message.attachments?.filter((img): img is string => img !== null)}
                   updatedAt={message.updatedAt}
                   createdAt={message._creationTime}
                   isEditing={editingId === message._id}
@@ -249,7 +254,7 @@ export function Thread({ messageId, onClose }: ThreadProps) {
           authorName={message.user.name}
           body={message.body}
           isAuthor={message.memberId === currentMember?._id}
-          image={message.image}
+          attachments={message.attachments?.filter((img): img is string => img !== null)}
           createdAt={message._creationTime}
           updatedAt={message.updatedAt}
           id={message._id}

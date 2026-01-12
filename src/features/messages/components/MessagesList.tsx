@@ -1,9 +1,9 @@
+import { useState, useRef, useEffect } from "react";
 import { GetMessagesReturnType } from "../api/use-get-messages";
 
 import { differenceInMinutes, format, isToday, isYesterday } from "date-fns";
 import { Message } from "./Message";
 import { ChannelHero } from "../../channels/components/ChannelHero";
-import { useState } from "react";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { useCurrentMember } from "@/features/members/api/use-current-member";
@@ -44,6 +44,9 @@ export function MessagesList({
 
   const { data: currentMember } = useCurrentMember({ workspaceId });
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const lastMessageIdRef = useRef<string | null>(null);
+
   // Don't play notification sound for messages in the current view
   // Global notifications will handle notifications for messages in other channels/conversations
   useNotificationSound({
@@ -51,6 +54,35 @@ export function MessagesList({
     currentMemberId: currentMember?._id,
     enabled: false,
   });
+
+  // Auto-scroll to bottom when current user sends a new message
+  useEffect(() => {
+    if (!currentMember) {
+      return;
+    }
+
+    // Reset tracking when data becomes empty (e.g., switching channels)
+    if (!data || data.length === 0) {
+      lastMessageIdRef.current = null;
+      return;
+    }
+
+    // Get the latest message (first in array since messages are ordered newest first)
+    const latestMessage = data[0];
+    const latestMessageId = latestMessage?._id;
+
+    // Check if a new message was added
+    if (latestMessageId && latestMessageId !== lastMessageIdRef.current) {
+      // Check if the new message is from the current user
+      if (latestMessage.memberId === currentMember._id) {
+        // Scroll to top (which is bottom visually due to flex-col-reverse)
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = 0;
+        }
+      }
+      lastMessageIdRef.current = latestMessageId;
+    }
+  }, [data, currentMember]);
 
   const groupedMessage = data?.reduce((groups, message) => {
     const date = new Date(message._creationTime);
@@ -64,7 +96,10 @@ export function MessagesList({
   }, {} as Record<string, typeof data>);
 
   return (
-    <div className="flex-1 flex flex-col-reverse pb-4 overflow-y-auto message-scrollbar">
+    <div
+      ref={scrollContainerRef}
+      className="flex-1 flex flex-col-reverse pb-4 overflow-y-auto message-scrollbar"
+    >
       {Object.entries(groupedMessage || {}).map(([dateKey, messages]) => (
         <div key={dateKey}>
           <div className="text-center my-2 relative">
@@ -99,7 +134,9 @@ export function MessagesList({
                 isAuthor={message.memberId === currentMember?._id}
                 reactions={message.reactions}
                 body={message.body}
-                image={message.image}
+                attachments={message.attachments?.filter(
+                  (img): img is string => img !== null
+                )}
                 updatedAt={message.updatedAt}
                 createdAt={message._creationTime}
                 isEditing={editingId === message._id}

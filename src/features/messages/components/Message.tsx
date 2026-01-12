@@ -35,7 +35,8 @@ interface MessageProps {
     }
   >;
   body: Doc<"messages">["body"];
-  image: string | null | undefined;
+  attachments?: string[];
+  image?: string | null | undefined; // Keep for backward compatibility
   updatedAt: Doc<"messages">["updatedAt"];
   createdAt: Doc<"messages">["_creationTime"];
   isEditing: boolean;
@@ -56,6 +57,7 @@ export function Message({
   isAuthor,
   reactions,
   body,
+  attachments,
   image,
   updatedAt,
   createdAt,
@@ -163,7 +165,15 @@ export function Message({
             ) : (
               <div className="flex flex-col w-full">
                 <Renderer value={body} />
-                <Thumbnail url={image} />
+                {attachments && attachments.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 my-2">
+                    {attachments.map((url, index) => (
+                      <Thumbnail key={index} url={url} />
+                    ))}
+                  </div>
+                ) : image ? (
+                  <Thumbnail url={image} />
+                ) : null}
                 {updatedAt ? (
                   <span className="text-xs text-muted-foreground">
                     (edited)
@@ -244,7 +254,15 @@ export function Message({
                 </Hint>
               </div>
               <Renderer value={body} />
-              <Thumbnail url={image} />
+              {attachments && attachments.length > 0 ? (
+                <div className="flex flex-wrap gap-2 my-2">
+                  {attachments.map((url, index) => (
+                    <Thumbnail key={index} url={url} />
+                  ))}
+                </div>
+              ) : image ? (
+                <Thumbnail url={image} />
+              ) : null}
               {updatedAt ? (
                 <span className="text-xs text-muted-foreground">(edited)</span>
               ) : null}

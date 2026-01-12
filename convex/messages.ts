@@ -224,7 +224,10 @@ async function populateThread(ctx: QueryCtx, messageId: Id<"messages">) {
   }
 
   // Get display name (displayName || fullName || name)
-  const displayName = lastMessageUser.displayName || lastMessageUser.fullName || lastMessageUser.name;
+  const displayName =
+    lastMessageUser.displayName ||
+    lastMessageUser.fullName ||
+    lastMessageUser.name;
 
   return {
     count: messages.length,
@@ -237,7 +240,7 @@ async function populateThread(ctx: QueryCtx, messageId: Id<"messages">) {
 export const create = mutation({
   args: {
     body: v.string(),
-    image: v.optional(v.id("_storage")),
+    attachments: v.optional(v.array(v.id("_storage"))),
     workspaceId: v.id("workspaces"),
     channelId: v.optional(v.id("channels")),
     parentMessageId: v.optional(v.id("messages")),
@@ -278,7 +281,12 @@ export const create = mutation({
     // Increment unread count for channel messages (not threads or conversations)
     // Thread replies don't increment unread - only top-level messages
     if (args.channelId && !args.parentMessageId) {
-      await incrementUnreadForChannel(ctx, args.channelId, messageId, member._id);
+      await incrementUnreadForChannel(
+        ctx,
+        args.channelId,
+        messageId,
+        member._id
+      );
     }
 
     // Increment unread count for conversation messages (not threads)
@@ -351,9 +359,11 @@ export const get = query({
 
             const thread = await populateThread(ctx, message._id);
 
-            const image = message.image
-              ? await ctx.storage.getUrl(message.image)
-              : undefined;
+            // Get attachment URLs
+            const attachmentIds = message.attachments || [];
+            const attachments = await Promise.all(
+              attachmentIds.map((id) => ctx.storage.getUrl(id))
+            );
 
             const reactionsWithCounts = reactions.map((reaction) => {
               return {
@@ -388,11 +398,12 @@ export const get = query({
             );
 
             // Get display name (displayName || fullName || name)
-            const userDisplayName = user.displayName || user.fullName || user.name;
+            const userDisplayName =
+              user.displayName || user.fullName || user.name;
 
             return {
               ...message,
-              image,
+              attachments,
               member,
               user: {
                 ...user,
@@ -464,8 +475,11 @@ export const remove = mutation({
       throw new Error("Unauthorized");
     }
 
-    if (message.image) {
-      await ctx.storage.delete(message.image);
+    // Delete all attachments
+    if (message.attachments) {
+      for (const attachmentId of message.attachments) {
+        await ctx.storage.delete(attachmentId);
+      }
     }
 
     await ctx.db.delete(args.id);
@@ -540,11 +554,15 @@ export const messageById = query({
       ({ memberId, ...rest }) => rest
     );
 
+    // Get attachment URLs
+    const attachmentIds = message.attachments || [];
+    const attachments = await Promise.all(
+      attachmentIds.map((id) => ctx.storage.getUrl(id))
+    );
+
     return {
       ...message,
-      image: message.image
-        ? await ctx.storage.getUrl(message.image)
-        : undefined,
+      attachments,
       member,
       user,
       reactions: reactionWithoutMemberIdProperty,
@@ -579,7 +597,9 @@ export const getRecentForNotifications = query({
     // Get all recent messages in the workspace
     const allMessages = await ctx.db
       .query("messages")
-      .withIndex("by_workspace_id", (q) => q.eq("workspaceId", args.workspaceId))
+      .withIndex("by_workspace_id", (q) =>
+        q.eq("workspaceId", args.workspaceId)
+      )
       .order("desc")
       .take(limit * 2); // Get more to filter out user's own messages
 
@@ -593,7 +613,7 @@ export const getRecentForNotifications = query({
       if (message.memberId === currentMember._id) {
         continue;
       }
-      
+
       // Skip thread replies
       if (message.parentMessageId) {
         continue;
@@ -609,7 +629,7 @@ export const getRecentForNotifications = query({
             q.eq("channelId", channelId).eq("memberId", currentMember._id)
           )
           .unique();
-        
+
         // Only include if member is part of the channel
         if (channelMembership) {
           relevantMessages.push(message);

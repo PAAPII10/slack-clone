@@ -12,7 +12,7 @@ type Options = {
 
 type RequestType = {
   body: string;
-  image?: Id<"_storage">;
+  attachments?: Id<"_storage">[];
   workspaceId: Id<"workspaces">;
   channelId?: Id<"channels">;
   parentMessageId?: Id<"messages">;

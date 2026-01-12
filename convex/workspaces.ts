@@ -166,8 +166,11 @@ export const remove = mutation({
     }
 
     for (const message of messages) {
-      if (message.image) {
-        await ctx.storage.delete(message.image);
+      // Delete all attachments
+      if (message.attachments) {
+        for (const attachmentId of message.attachments) {
+          await ctx.storage.delete(attachmentId);
+        }
       }
       await ctx.db.delete(message._id);
     }

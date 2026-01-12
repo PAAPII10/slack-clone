@@ -9,7 +9,6 @@ import { useChannelId } from "@/hooks/use-channel-id";
 import { Loader, TriangleAlert } from "lucide-react";
 import { useIsChannelMember } from "@/features/channels/api/use-is-channel-member";
 import { useJoinChannel } from "@/features/channels/api/use-join-channel";
-import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -18,7 +17,6 @@ import { useEffect, useRef } from "react";
 
 export default function ChannelIdPage() {
   const channelId = useChannelId();
-  const workspaceId = useWorkspaceId();
   const router = useRouter();
   const { data: channel, isLoading: isChannelLoading } = useGetChannel({
     id: channelId,

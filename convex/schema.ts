@@ -37,7 +37,7 @@ const schema = defineSchema({
   }).index("by_workspace_id", ["workspaceId"]),
   messages: defineTable({
     body: v.string(),
-    image: v.optional(v.id("_storage")),
+    attachments: v.optional(v.array(v.id("_storage"))),
     memberId: v.id("members"),
     workspaceId: v.id("workspaces"),
     channelId: v.optional(v.id("channels")),
@@ -128,8 +128,7 @@ const schema = defineSchema({
     displayName: v.optional(v.string()),
     title: v.optional(v.string()),
     pronunciation: v.optional(v.string()),
-  })
-    .index("by_user_id", ["userId"]),
+  }).index("by_user_id", ["userId"]),
 });
 
 export default schema;

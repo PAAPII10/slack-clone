@@ -21,7 +21,7 @@ type CreateMessageValue = {
   conversationId: Id<"conversations">;
   workspaceId: Id<"workspaces">;
   body: string;
-  image?: Id<"_storage">;
+  attachments?: Id<"_storage">[];
 };
 
 export function ChatInput({ placeholder, conversationId }: ChatInputProps) {
@@ -38,7 +38,7 @@ export function ChatInput({ placeholder, conversationId }: ChatInputProps) {
 
   const editorRef = useRef<Quill | null>(null);
 
-  const onSubmit = async ({ image, body }: EditorValue) => {
+  const onSubmit = async ({ attachments, body }: EditorValue) => {
     try {
       setIsPending(true);
       editorRef.current?.enable(false);
@@ -47,31 +47,36 @@ export function ChatInput({ placeholder, conversationId }: ChatInputProps) {
         body,
         workspaceId,
         conversationId,
-        image: undefined,
+        attachments: undefined,
       };
 
-      if (image) {
-        const uploadUrl = await generateUploadUrl({ throwError: true });
+      if (attachments && attachments.length > 0) {
+        // Upload all files
+        const storageIds: Id<"_storage">[] = [];
+        for (const attachment of attachments) {
+          const uploadUrl = await generateUploadUrl({ throwError: true });
 
-        if (!uploadUrl) {
-          throw new Error("Url not found");
+          if (!uploadUrl) {
+            throw new Error("Url not found");
+          }
+
+          const result = await fetch(uploadUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": attachment.type,
+            },
+            body: attachment,
+          });
+
+          if (!result.ok) {
+            throw new Error("Failed to upload file");
+          }
+
+          const { storageId } = await result.json();
+          storageIds.push(storageId);
         }
 
-        const result = await fetch(uploadUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": image.type,
-          },
-          body: image,
-        });
-
-        if (!result.ok) {
-          throw new Error("Failed to upload image");
-        }
-
-        const { storageId } = await result.json();
-
-        values.image = storageId;
+        values.attachments = storageIds;
       }
 
       await createMessage(values, {

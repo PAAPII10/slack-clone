@@ -1,24 +1,40 @@
 "use client";
 
-import { RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  RefObject,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { toast } from "sonner";
 import { Delta, Op } from "quill/core";
 import Quill, { QuillOptions } from "quill";
+import { useDropzone, type FileRejection } from "react-dropzone";
 
 import { PiTextAa } from "react-icons/pi";
 import { MdSend } from "react-icons/md";
 
 import { Button } from "./ui/button";
 import "quill/dist/quill.snow.css";
-import { ImageIcon, Smile, XIcon } from "lucide-react";
+import { Paperclip, Smile, VideoIcon, XIcon } from "lucide-react";
 import { Hint } from "./Hint";
 import { cn } from "@/lib/utils";
 import { EmojiPopover } from "./emoji-popover";
 import Image from "next/image";
 import { Id } from "../../convex/_generated/dataModel";
 import { TypingIndicator } from "@/features/typing/components/TypingIndicator";
+import {
+  getFileType,
+  getSpecificFileType,
+  formatFileSize,
+} from "@/lib/file-utils";
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
 
 export type EditorValue = {
-  image: File | null;
+  attachments: File[];
   body: string;
 };
 interface EditorProps {
@@ -28,7 +44,7 @@ interface EditorProps {
   disabled?: boolean;
   innerRef?: RefObject<Quill | null>;
   onCancel?: () => void;
-  onSubmit: ({ image, body }: EditorValue) => void;
+  onSubmit: ({ attachments, body }: EditorValue) => void;
   onTypingStart?: () => void;
   onTypingStop?: () => void;
   conversationId?: Id<"conversations">;
@@ -49,7 +65,7 @@ export default function Editor({
   channelId,
 }: EditorProps) {
   const [text, setText] = useState("");
-  const [image, setImage] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [isToolbarVisible, setIsToolbarVisible] = useState(true);
 
   const submitRef = useRef(onSubmit);
@@ -58,15 +74,100 @@ export default function Editor({
   const defaultValueRef = useRef(defaultValue);
   const containerRef = useRef<HTMLDivElement>(null);
   const disabledRef = useRef(disabled);
-  const imageElementRef = useRef<HTMLInputElement | null>(null);
+  const filesRef = useRef<File[]>([]);
   const onTypingStartRef = useRef(onTypingStart);
   const onTypingStopRef = useRef(onTypingStop);
+
+  const onDrop = useCallback(
+    (acceptedFiles: File[]) => {
+      if (acceptedFiles.length > 0 && !disabled) {
+        // Validate all files
+        const validFiles: File[] = [];
+        for (const file of acceptedFiles) {
+          if (file.size > MAX_FILE_SIZE) {
+            toast.error(
+              `File "${file.name}" exceeds 10MB limit. Your file is ${formatFileSize(
+                file.size
+              )}.`
+            );
+            continue;
+          }
+          validFiles.push(file);
+        }
+
+        if (validFiles.length > 0) {
+          setFiles((prev) => [...prev, ...validFiles]);
+          // Focus the editor after files are selected
+          setTimeout(() => {
+            quillRef.current?.focus();
+          }, 100);
+        }
+      }
+    },
+    [disabled]
+  );
+
+  const onDropRejected = useCallback((fileRejections: FileRejection[]) => {
+    if (fileRejections.length > 0) {
+      const rejection = fileRejections[0];
+      const hasSizeError = rejection.errors.some(
+        (error) => error.code === "file-too-large"
+      );
+      const hasTypeError = rejection.errors.some(
+        (error) => error.code === "file-invalid-type"
+      );
+
+      if (hasSizeError) {
+        toast.error(
+          `File "${rejection.file.name}" exceeds 10MB limit. Please choose a smaller file.`
+        );
+      } else if (hasTypeError) {
+        toast.error(
+          `File type not supported for "${rejection.file.name}". Please choose a different file.`
+        );
+      } else {
+        toast.error("Failed to upload file. Please try again.");
+      }
+    }
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
+    onDrop,
+    onDropRejected,
+    accept: {
+      "image/*": [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"],
+      "video/*": [".mp4", ".webm", ".ogg", ".mov", ".avi"],
+      "application/pdf": [".pdf"],
+      "application/msword": [".doc"],
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        [".docx"],
+      "application/vnd.ms-excel": [".xls"],
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [
+        ".xlsx",
+      ],
+      "application/vnd.ms-powerpoint": [".ppt"],
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        [".pptx"],
+      "text/*": [".txt", ".csv", ".md"],
+      "application/json": [".json"],
+      "application/zip": [".zip"],
+      "application/x-zip-compressed": [".zip"],
+      "application/x-rar-compressed": [".rar"],
+      "application/x-7z-compressed": [".7z"],
+    },
+    maxFiles: 10,
+    maxSize: MAX_FILE_SIZE,
+    disabled,
+    noClick: true,
+    noKeyboard: true,
+  });
 
   useLayoutEffect(() => {
     submitRef.current = onSubmit;
     placeholderRef.current = placeholder;
     defaultValueRef.current = defaultValue;
     disabledRef.current = disabled;
+    filesRef.current = files;
     onTypingStartRef.current = onTypingStart;
     onTypingStopRef.current = onTypingStop;
   });
@@ -94,10 +195,10 @@ export default function Editor({
               key: "Enter",
               handler: () => {
                 const text = quill.getText();
-                const addedImage = imageElementRef.current?.files?.[0] || null;
+                const currentFiles = filesRef.current;
 
                 const isEmpty =
-                  !addedImage &&
+                  currentFiles.length === 0 &&
                   text.replace(/<(.|\n)*?>/g, "").trim().length === 0;
                 if (isEmpty) return;
 
@@ -108,7 +209,7 @@ export default function Editor({
 
                 const body = JSON.stringify(quill.getContents());
                 submitRef.current?.({
-                  image: addedImage,
+                  attachments: currentFiles,
                   body,
                 });
               },
@@ -137,28 +238,29 @@ export default function Editor({
     setText(quill.getText());
 
     // URL detection regex - matches http, https, www, and common domains
-    const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9-]+\.[a-zA-Z]{2,}[^\s]*)/g;
+    const urlRegex =
+      /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9-]+\.[a-zA-Z]{2,}[^\s]*)/g;
 
     // Function to detect and convert URLs to links
     const convertUrlsToLinks = () => {
       const text = quill.getText();
-      
+
       // Find all URLs in the text
       const matches = Array.from(text.matchAll(urlRegex));
-      
+
       if (matches.length === 0) return;
-      
+
       // Process matches in reverse order to maintain correct indices
       matches.reverse().forEach((match) => {
         if (!match.index && match.index !== 0) return;
-        
+
         const startIndex = match.index;
         const endIndex = startIndex + match[0].length;
-        
+
         // Check if this range already has a link format
         const format = quill.getFormat(startIndex, endIndex - startIndex);
         if (format.link) return; // Already a link, skip
-        
+
         // Get the URL text
         const urlText = match[0];
         // Ensure URL has protocol
@@ -166,13 +268,19 @@ export default function Editor({
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
           url = "https://" + url;
         }
-        
+
         // Apply link format
-        quill.formatText(startIndex, endIndex - startIndex, "link", url, "user");
+        quill.formatText(
+          startIndex,
+          endIndex - startIndex,
+          "link",
+          url,
+          "user"
+        );
       });
     };
 
-    // Handle image paste from clipboard
+    // Handle file paste from clipboard
     const handlePaste = (e: Event) => {
       const clipboardEvent = e as ClipboardEvent;
       const items = clipboardEvent.clipboardData?.items;
@@ -180,16 +288,19 @@ export default function Editor({
 
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        if (item.type.indexOf("image") !== -1) {
+        // Support both images and other files
+        if (item.kind === "file") {
           clipboardEvent.preventDefault();
           clipboardEvent.stopPropagation();
           const blob = item.getAsFile();
           if (blob) {
-            // Convert blob to File object
-            const file = new File([blob], `pasted-image-${Date.now()}.png`, {
-              type: blob.type || "image/png",
+            const fileName = item.type.startsWith("image/")
+              ? `pasted-image-${Date.now()}.png`
+              : `pasted-file-${Date.now()}`;
+            const pastedFile = new File([blob], fileName, {
+              type: blob.type || "application/octet-stream",
             });
-            setImage(file);
+            setFiles((prev) => [...prev, pastedFile]);
           }
           return;
         }
@@ -230,7 +341,7 @@ export default function Editor({
     quill.on(Quill.events.TEXT_CHANGE, (_delta, _oldDelta, source) => {
       setText(quill.getText());
       handleTextChange();
-      
+
       // Convert URLs to links when user types (not when programmatically changed)
       if (source === "user") {
         // Use setTimeout to allow the text to be inserted first
@@ -238,7 +349,7 @@ export default function Editor({
           convertUrlsToLinks();
         }, 0);
       }
-      
+
       // Emit typing start event when user types
       if (variant === "create" && onTypingStartRef.current) {
         onTypingStartRef.current();
@@ -281,44 +392,65 @@ export default function Editor({
     quill.insertText(index, emoji);
   };
 
-  const isEmpty = !image && text.replace(/<(.|\n)*?>/g, "").trim().length === 0;
+  const isEmpty = files.length === 0 && text.replace(/<(.|\n)*?>/g, "").trim().length === 0;
 
   return (
-    <div className="flex flex-col">
-      <input
-        type="file"
-        accept="image/*"
-        ref={imageElementRef}
-        className="hidden"
-        onChange={(e) => setImage(e.target.files?.[0] || null)}
-      />
+    <div className="flex flex-col" {...getRootProps()}>
+      <input {...getInputProps()} />
       <div
         className={cn(
           "flex flex-col border border-slate-200 rounded-md overflow-hidden focus-within:border-slate-300 focus-within:shadow-sm transition bg-white",
-          disabled && "opacity-50"
+          disabled && "opacity-50",
+          isDragActive && "border-blue-400 bg-blue-50/50"
         )}
       >
         <div ref={containerRef} className="h-full ql-custom" />
-        {!!image && (
+        {files.length > 0 && (
           <div className="p-2">
-            <div className="relative size-[62px] flex items-center justify-center group/image">
-              <Hint label="Remove image">
-                <button
-                  onClick={() => {
-                    setImage(null);
-                    imageElementRef.current!.value = "";
-                  }}
-                  className="hidden group-hover/image:flex rounded-full bg-black/70 hover:bg-black absolute -top-2.5 -right-2.5 text-white size-6 z-4 border-2 border-white items-center justify-center"
-                >
-                  <XIcon className="size-3.5" />
-                </button>
-              </Hint>
-              <Image
-                src={URL.createObjectURL(image)}
-                alt="Uploaded"
-                fill
-                className="rounded-xl overflow-hidden border object-cover"
-              />
+            <div className="flex flex-wrap gap-2">
+              {files.map((file, index) => {
+                const fileType = getFileType(file);
+                return (
+                  <div
+                    key={`${file.name}-${index}`}
+                    className="relative flex flex-col items-start gap-1 group/file"
+                  >
+                    <div className="relative size-[62px] flex items-center justify-center">
+                      <Hint label="Remove file">
+                        <button
+                          onClick={() => {
+                            setFiles((prev) => prev.filter((_, i) => i !== index));
+                          }}
+                          className="hidden group-hover/file:flex rounded-full bg-black/70 hover:bg-black absolute -top-2.5 -right-2.5 text-white size-6 z-4 border-2 border-white items-center justify-center"
+                        >
+                          <XIcon className="size-3.5" />
+                        </button>
+                      </Hint>
+                      <Hint label={file.name}>
+                        {fileType === "image" ? (
+                          <Image
+                            src={URL.createObjectURL(file)}
+                            alt={file.name}
+                            fill
+                            className="rounded-xl overflow-hidden border object-cover"
+                          />
+                        ) : fileType === "video" ? (
+                          <div className="size-full flex items-center justify-center bg-slate-200 rounded-xl border">
+                            <VideoIcon className="size-6 text-slate-600" />
+                          </div>
+                        ) : (
+                          <div className="size-full flex items-center justify-center bg-slate-200 rounded-xl border">
+                            {renderFileIcon(file)}
+                          </div>
+                        )}
+                      </Hint>
+                    </div>
+                    <p className="text-[10px] text-slate-500 max-w-[62px] truncate">
+                      {formatFileSize(file.size)}
+                    </p>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -341,14 +473,17 @@ export default function Editor({
             </Button>
           </EmojiPopover>
           {variant === "create" && (
-            <Hint label="Image">
+            <Hint label="Attachment">
               <Button
                 disabled={disabled}
                 size="icon-sm"
                 variant="ghost"
-                onClick={() => imageElementRef.current?.click()}
+                onClick={(e) => {
+                  (e.currentTarget as HTMLButtonElement).blur();
+                  open();
+                }}
               >
-                <ImageIcon className="size-4" />
+                <Paperclip className="size-4" />
               </Button>
             </Hint>
           )}
@@ -366,7 +501,7 @@ export default function Editor({
                 size="sm"
                 onClick={() => {
                   onSubmit({
-                    image,
+                    attachments: files,
                     body: JSON.stringify(quillRef.current?.getContents()),
                   });
                 }}
@@ -393,7 +528,7 @@ export default function Editor({
                   onTypingStopRef.current();
                 }
                 onSubmit({
-                  image,
+                  attachments: files,
                   body: JSON.stringify(quillRef.current?.getContents()),
                 });
               }}
@@ -426,4 +561,32 @@ export default function Editor({
       )}
     </div>
   );
+}
+
+/* eslint-disable @next/next/no-img-element */
+function renderFileIcon(file: File) {
+  const specificType = getSpecificFileType(file);
+
+  switch (specificType) {
+    case "pdf":
+      return <img src="/pdf-icon.svg" alt="PDF file" className="size-6" />;
+    case "excel":
+      return <img src="/excel-icon.svg" alt="Excel file" className="size-6" />;
+    case "word":
+      return <img src="/word-icon.svg" alt="Word file" className="size-6" />;
+    case "text":
+      return <img src="/text-file.svg" alt="Text file" className="size-6" />;
+    case "json":
+      return <img src="/json-icon.svg" alt="JSON file" className="size-6" />;
+    case "csv":
+      return <img src="/excel-icon.svg" alt="CSV file" className="size-6" />;
+    case "powerpoint":
+      return (
+        <img src="/ppt-icon.svg" alt="PowerPoint file" className="size-6" />
+      );
+    case "zip":
+      return <img src="/zip-icon.svg" alt="ZIP file" className="size-6" />;
+    default:
+      return <img src="/file.svg" alt="File" className="size-6" />;
+  }
 }
