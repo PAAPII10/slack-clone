@@ -5,6 +5,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
+import { useMemberOnlineStatus } from "@/features/presence/api/use-presence";
 
 interface UserItemProps {
   id: Id<"members">;
@@ -36,6 +37,8 @@ export function UserItem({
 }: UserItemProps) {
   const workspaceId = useWorkspaceId();
   const avatarFallback = label.charAt(0).toUpperCase();
+  const isOnline = useMemberOnlineStatus({ memberId: id });
+
   return (
     <Button
       variant="transparent"
@@ -44,10 +47,23 @@ export function UserItem({
       asChild
     >
       <Link href={`/workspace/${workspaceId}/member/${id}`}>
-        <Avatar className="size-5 mr-1">
-          <AvatarImage src={image} />
-          <AvatarFallback>{avatarFallback}</AvatarFallback>
-        </Avatar>
+        <div className="relative">
+          <Avatar className="size-5 mr-1">
+            <AvatarImage src={image} />
+            <AvatarFallback>{avatarFallback}</AvatarFallback>
+          </Avatar>
+          {isOnline ? (
+            <span
+              className="absolute bottom-0 right-0.5 size-2 bg-green-500 border border-[#5E2C5F] rounded-full"
+              aria-label="Online"
+            />
+          ) : (
+            <span
+              className="absolute bottom-0 right-0.5 size-2 bg-gray-400 border border-[#5E2C5F] rounded-full"
+              aria-label="Offline"
+            />
+          )}
+        </div>
         <span className="text-sm truncate">{label}</span>
       </Link>
     </Button>

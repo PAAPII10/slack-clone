@@ -43,6 +43,7 @@ export function Conversation({ id }: ConversationProps) {
       <MemberHeader
         memberName={member?.user.name}
         memberImage={member?.user.image}
+        memberId={memberId}
         onClick={() => onOpenProfile(memberId)}
       />
       <MessagesList

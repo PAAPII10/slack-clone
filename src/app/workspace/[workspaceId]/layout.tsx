@@ -16,10 +16,17 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { Thread } from "@/features/messages/components/Thread";
 import { Profile } from "@/features/members/components/Profile";
 import { useGlobalNotifications } from "@/hooks/use-global-notifications";
+import { usePresence } from "@/features/presence/api/use-presence";
+import { useWorkspaceId } from "@/hooks/use-workspace-id";
 
 export default function WorkspaceIdLayout({ children }: PropsWithChildren) {
+  const workspaceId = useWorkspaceId();
+  
   // Global notifications for all workspace messages
   useGlobalNotifications();
+  
+  // Track user presence (online/offline status)
+  usePresence({ workspaceId: workspaceId!, enabled: !!workspaceId });
   const { parentMessageId, profileMemberId, onCloseMessage, onCloseProfile } =
     usePanel();
 

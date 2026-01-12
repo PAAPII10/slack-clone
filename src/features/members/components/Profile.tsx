@@ -26,6 +26,7 @@ import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/use-confirm";
 import { useRouter } from "next/navigation";
+import { useMemberOnlineStatus } from "@/features/presence/api/use-presence";
 
 interface ProfileProps {
   memberId: Id<"members">;
@@ -41,6 +42,8 @@ export function Profile({ memberId, onClose }: ProfileProps) {
   const { data: member, isLoading: isMemberLoading } = useGetMember({
     id: memberId,
   });
+
+  const isOnline = useMemberOnlineStatus({ memberId });
 
   const [LeaveConfirmDialog, leaveConfirm] = useConfirm({
     title: "Leave workspace",
@@ -175,7 +178,9 @@ export function Profile({ memberId, onClose }: ProfileProps) {
           </Avatar>
         </div>
         <div className="flex flex-col p-4">
-          <p className="text-xl font-bold">{member.user.name}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-xl font-bold">{member.user.name}</p>
+          </div>
           {currentMember?.role === "admin" &&
           currentMember?._id !== memberId ? (
             <div className="flex items-center gap-2 mt-4 w-fit">
@@ -242,6 +247,25 @@ export function Profile({ memberId, onClose }: ProfileProps) {
                 {member.user.email}
               </Link>
             </div>
+          </div>
+          <div className="flex items-center gap-2 mt-3">
+            {isOnline ? (
+              <>
+                <span
+                  className="size-2 bg-green-500 rounded-full"
+                  aria-label="Active"
+                />
+                <span className="text-sm text-muted-foreground">Active</span>
+              </>
+            ) : (
+              <>
+                <span
+                  className="size-2 bg-gray-400 rounded-full"
+                  aria-label="Away"
+                />
+                <span className="text-sm text-muted-foreground">Away</span>
+              </>
+            )}
           </div>
         </div>
       </div>
