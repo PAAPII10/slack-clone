@@ -420,9 +420,21 @@ export const getRecentForNotifications = query({
         continue;
       }
 
-      // If it's a channel message, include it (public to all workspace members)
-      if (message.channelId) {
-        relevantMessages.push(message);
+      // If it's a channel message, check if current member is part of the channel
+      const channelId = message.channelId;
+      if (channelId) {
+        // Check if the current member is in the channel
+        const channelMembership = await ctx.db
+          .query("channelMembers")
+          .withIndex("by_channel_id_member_id", (q) =>
+            q.eq("channelId", channelId).eq("memberId", currentMember._id)
+          )
+          .unique();
+        
+        // Only include if member is part of the channel
+        if (channelMembership) {
+          relevantMessages.push(message);
+        }
         continue;
       }
 
