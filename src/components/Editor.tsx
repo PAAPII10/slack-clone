@@ -86,9 +86,9 @@ export default function Editor({
         for (const file of acceptedFiles) {
           if (file.size > MAX_FILE_SIZE) {
             toast.error(
-              `File "${file.name}" exceeds 10MB limit. Your file is ${formatFileSize(
-                file.size
-              )}.`
+              `File "${
+                file.name
+              }" exceeds 10MB limit. Your file is ${formatFileSize(file.size)}.`
             );
             continue;
           }
@@ -392,7 +392,8 @@ export default function Editor({
     quill.insertText(index, emoji);
   };
 
-  const isEmpty = files.length === 0 && text.replace(/<(.|\n)*?>/g, "").trim().length === 0;
+  const isEmpty =
+    files.length === 0 && text.replace(/<(.|\n)*?>/g, "").trim().length === 0;
 
   return (
     <div className="flex flex-col" {...getRootProps()}>
@@ -419,7 +420,9 @@ export default function Editor({
                       <Hint label="Remove file">
                         <button
                           onClick={() => {
-                            setFiles((prev) => prev.filter((_, i) => i !== index));
+                            setFiles((prev) =>
+                              prev.filter((_, i) => i !== index)
+                            );
                           }}
                           className="hidden group-hover/file:flex rounded-full bg-black/70 hover:bg-black absolute -top-2.5 -right-2.5 text-white size-6 z-4 border-2 border-white items-center justify-center"
                         >

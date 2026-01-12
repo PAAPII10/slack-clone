@@ -359,11 +359,21 @@ export const get = query({
 
             const thread = await populateThread(ctx, message._id);
 
-            // Get attachment URLs
+            // Get attachment URLs and metadata
             const attachmentIds = message.attachments || [];
             const attachments = await Promise.all(
-              attachmentIds.map((id) => ctx.storage.getUrl(id))
+              attachmentIds.map(async (id) => {
+                const url = await ctx.storage.getUrl(id);
+                if (!url) return null;
+                const metadata = await ctx.db.system.get("_storage", id).catch(() => null);
+                return {
+                  url,
+                  size: metadata?.size ?? null,
+                };
+              })
             );
+            // Filter out null entries
+            const validAttachments = attachments.filter((att): att is { url: string; size: number | null } => att !== null);
 
             const reactionsWithCounts = reactions.map((reaction) => {
               return {
@@ -403,7 +413,7 @@ export const get = query({
 
             return {
               ...message,
-              attachments,
+              attachments: validAttachments,
               member,
               user: {
                 ...user,
@@ -554,15 +564,25 @@ export const messageById = query({
       ({ memberId, ...rest }) => rest
     );
 
-    // Get attachment URLs
+    // Get attachment URLs and metadata
     const attachmentIds = message.attachments || [];
     const attachments = await Promise.all(
-      attachmentIds.map((id) => ctx.storage.getUrl(id))
+      attachmentIds.map(async (id) => {
+        const url = await ctx.storage.getUrl(id);
+        if (!url) return null;
+        const metadata = await ctx.db.system.get("_storage", id).catch(() => null);
+        return {
+          url,
+          size: metadata?.size ?? null,
+        };
+      })
     );
+    // Filter out null entries
+    const validAttachments = attachments.filter((att): att is { url: string; size: number | null } => att !== null);
 
     return {
       ...message,
-      attachments,
+      attachments: validAttachments,
       member,
       user,
       reactions: reactionWithoutMemberIdProperty,

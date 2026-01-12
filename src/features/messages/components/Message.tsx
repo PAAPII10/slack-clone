@@ -35,7 +35,7 @@ interface MessageProps {
     }
   >;
   body: Doc<"messages">["body"];
-  attachments?: string[];
+  attachments?: Array<string | { url: string; size: number | null }>;
   image?: string | null | undefined; // Keep for backward compatibility
   updatedAt: Doc<"messages">["updatedAt"];
   createdAt: Doc<"messages">["_creationTime"];
@@ -167,8 +167,12 @@ export function Message({
                 <Renderer value={body} />
                 {attachments && attachments.length > 0 ? (
                   <div className="flex flex-wrap gap-2 my-2">
-                    {attachments.map((url, index) => (
-                      <Thumbnail key={index} url={url} />
+                    {attachments.map((attachment, index) => (
+                      <Thumbnail
+                        key={index}
+                        url={typeof attachment === "string" ? attachment : attachment.url}
+                        size={typeof attachment === "string" ? undefined : attachment.size ?? undefined}
+                      />
                     ))}
                   </div>
                 ) : image ? (
@@ -256,8 +260,12 @@ export function Message({
               <Renderer value={body} />
               {attachments && attachments.length > 0 ? (
                 <div className="flex flex-wrap gap-2 my-2">
-                  {attachments.map((url, index) => (
-                    <Thumbnail key={index} url={url} />
+                  {attachments.map((attachment, index) => (
+                    <Thumbnail
+                      key={index}
+                      url={typeof attachment === "string" ? attachment : attachment.url}
+                      size={typeof attachment === "string" ? undefined : attachment.size ?? undefined}
+                    />
                   ))}
                 </div>
               ) : image ? (

@@ -8,9 +8,11 @@ import {
   getFileNameFromUrl,
 } from "@/lib/file-url-utils";
 import { Button } from "@/components/ui/button";
+import { formatFileSize } from "@/lib/file-utils";
 
 interface ThumbnailProps {
   url: string | null | undefined;
+  size?: number | null;
 }
 
 function renderFileIcon(specificType: string) {
@@ -112,7 +114,7 @@ async function detectFileTypeFromContentType(
   });
 }
 
-export function Thumbnail({ url }: ThumbnailProps) {
+export function Thumbnail({ url, size }: ThumbnailProps) {
   const [fileType, setFileType] = useState<
     | "image"
     | "video"
@@ -131,6 +133,8 @@ export function Thumbnail({ url }: ThumbnailProps) {
     return getSpecificFileTypeFromUrl(url);
   });
 
+  const [fileSize, setFileSize] = useState<number | null>(size ?? null);
+
   useEffect(() => {
     if (!url) {
       return;
@@ -143,6 +147,28 @@ export function Thumbnail({ url }: ThumbnailProps) {
     // If urlType is already known from URL, no need to update state
     // (initial state already handles this case)
   }, [url]);
+
+  // Fetch file size for non-image files if not provided from storage
+  useEffect(() => {
+    if (!url || fileType === "image" || size !== undefined) {
+      return;
+    }
+
+    const fetchFileSize = async () => {
+      try {
+        const response = await fetch(url, { method: "HEAD" });
+        const contentLength = response.headers.get("content-length");
+        if (contentLength) {
+          setFileSize(parseInt(contentLength, 10));
+        }
+      } catch (error) {
+        console.warn("Failed to fetch file size:", error);
+      setFileSize(null);
+      }
+    };
+
+    fetchFileSize();
+  }, [url, fileType, size]);
 
   if (!url) return null;
 
@@ -220,6 +246,11 @@ export function Thumbnail({ url }: ThumbnailProps) {
         >
           Your browser does not support the video tag.
         </video>
+        {fileSize !== null && (
+          <div className="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+            {formatFileSize(fileSize)}
+          </div>
+        )}
         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
           <Button
             variant="secondary"
@@ -265,6 +296,7 @@ export function Thumbnail({ url }: ThumbnailProps) {
             {fileType === "powerpoint" && "PowerPoint Presentation"}
             {fileType === "zip" && "ZIP Archive"}
             {fileType === "other" && "File Attachment"}
+            {fileSize !== null && ` • ${formatFileSize(fileSize)}`}
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">

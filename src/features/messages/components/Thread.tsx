@@ -201,11 +201,16 @@ export function Thread({ messageId, onClose }: ThreadProps) {
                   id={message._id}
                   memberId={message.memberId}
                   authorImage={message.user.image}
-                  authorName={message.user.displayName || message.user.fullName || message.user.name || "Member"}
+                  authorName={
+                    message.user.displayName ||
+                    message.user.fullName ||
+                    message.user.name ||
+                    "Member"
+                  }
                   isAuthor={message.memberId === currentMember?._id}
                   reactions={message.reactions}
                   body={message.body}
-                  attachments={message.attachments?.filter((img): img is string => img !== null)}
+                  attachments={message.attachments}
                   updatedAt={message.updatedAt}
                   createdAt={message._creationTime}
                   isEditing={editingId === message._id}
@@ -254,7 +259,7 @@ export function Thread({ messageId, onClose }: ThreadProps) {
           authorName={message.user.name}
           body={message.body}
           isAuthor={message.memberId === currentMember?._id}
-          attachments={message.attachments?.filter((img): img is string => img !== null)}
+          attachments={message.attachments}
           createdAt={message._creationTime}
           updatedAt={message.updatedAt}
           id={message._id}
