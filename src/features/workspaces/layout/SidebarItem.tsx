@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
-import { LucideIcon } from "lucide-react";
+import { LucideIcon, Plus } from "lucide-react";
 import Link from "next/link";
 import { IconType } from "react-icons/lib";
 import { cva, type VariantProps } from "class-variance-authority";
@@ -12,6 +12,9 @@ interface SidebarItemProps {
   id: string;
   variant?: VariantProps<typeof sidebarItemVariants>["variant"];
   href?: string;
+  showJoinButton?: boolean;
+  onJoin?: () => void;
+  isJoining?: boolean;
 }
 
 const sidebarItemVariants = cva(
@@ -35,19 +38,42 @@ export function SidebarItem({
   id,
   variant,
   href,
+  showJoinButton,
+  onJoin,
+  isJoining,
 }: SidebarItemProps) {
   const workspaceId = useWorkspaceId();
+
+  const handleJoinClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onJoin?.();
+  };
+
   return (
-    <Button
-      asChild
-      variant="transparent"
-      size="sm"
-      className={cn(sidebarItemVariants({ variant }))}
-    >
-      <Link href={href ? href : `/workspace/${workspaceId}/channel/${id}`}>
-        <Icon className="size-3.5 mr-1 shrink-0" />
-        <span className="text-sm truncate">{label}</span>
-      </Link>
-    </Button>
+    <div className="flex items-center group">
+      <Button
+        asChild
+        variant="transparent"
+        size="sm"
+        className={cn(sidebarItemVariants({ variant }), "flex-1")}
+      >
+        <Link href={href ? href : `/workspace/${workspaceId}/channel/${id}`}>
+          <Icon className="size-3.5 mr-1 shrink-0" />
+          <span className="text-sm truncate">{label}</span>
+        </Link>
+      </Button>
+      {showJoinButton && (
+        <Button
+          variant="transparent"
+          size="sm"
+          onClick={handleJoinClick}
+          disabled={isJoining}
+          className="opacity-0 group-hover:opacity-100 transition-opacity px-2 text-[#f9edffcc] hover:text-white"
+        >
+          <Plus className="size-3.5" />
+        </Button>
+      )}
+    </div>
   );
 }

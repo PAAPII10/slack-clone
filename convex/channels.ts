@@ -1,6 +1,11 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, QueryCtx } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { Doc, Id } from "./_generated/dataModel";
+
+function populateUser(ctx: QueryCtx, id: Id<"users">) {
+  return ctx.db.get(id);
+}
 
 export const get = query({
   args: {
@@ -20,14 +25,43 @@ export const get = query({
     if (!member) {
       return [];
     }
-    const channels = await ctx.db
+
+    const publicChannels = await ctx.db
       .query("channels")
       .withIndex("by_workspace_id", (q) =>
         q.eq("workspaceId", args.workspaceId)
       )
+      .filter((q) => q.eq(q.field("channelType"), "public"))
       .collect();
 
-    return channels;
+    // Get private channel memberships for this member
+    const channelMemberships = await ctx.db
+      .query("channelMembers")
+      .withIndex("by_member_id", (q) => q.eq("memberId", member._id))
+      .collect();
+
+    if (channelMemberships.length === 0) {
+      return publicChannels;
+    }
+
+    // Fetch private channels via memberships
+    const privateChannels = await Promise.all(
+      channelMemberships.map(async (cm) => {
+        const channel = await ctx.db.get(cm.channelId);
+        if (
+          channel &&
+          channel.workspaceId === args.workspaceId &&
+          channel.channelType === "private"
+        ) {
+          return channel;
+        }
+        return null;
+      })
+    );
+    return [
+      ...publicChannels,
+      ...privateChannels.filter(Boolean),
+    ] as Doc<"channels">[];
   },
 });
 
@@ -35,6 +69,7 @@ export const create = mutation({
   args: {
     name: v.string(),
     workspaceId: v.id("workspaces"),
+    channelType: v.union(v.literal("public"), v.literal("private")),
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
@@ -42,7 +77,6 @@ export const create = mutation({
     if (!userId) {
       throw new Error("Unauthorized");
     }
-
     const member = await ctx.db
       .query("members")
       .withIndex("by_workspace_id_user_id", (q) =>
@@ -50,7 +84,7 @@ export const create = mutation({
       )
       .unique();
 
-    if (!member || member.role !== "admin") {
+    if (!member) {
       throw new Error("Unauthorized");
     }
 
@@ -59,7 +93,15 @@ export const create = mutation({
     const channelId = await ctx.db.insert("channels", {
       name: parsedName,
       workspaceId: args.workspaceId,
+      channelType: args.channelType,
     });
+
+    await ctx.db.insert("channelMembers", {
+      channelId,
+      memberId: member._id,
+      ownerId: member._id,
+    });
+
     return channelId;
   },
 });
@@ -92,6 +134,20 @@ export const getById = query({
       return null;
     }
 
+    // For private channels, verify the user is a member of the channel
+    if (channel.channelType === "private") {
+      const channelMember = await ctx.db
+        .query("channelMembers")
+        .withIndex("by_channel_id_member_id", (q) =>
+          q.eq("channelId", args.id).eq("memberId", member._id)
+        )
+        .unique();
+
+      if (!channelMember) {
+        return null; // User is not a member of this private channel
+      }
+    }
+
     return channel;
   },
 });
@@ -100,6 +156,7 @@ export const update = mutation({
   args: {
     id: v.id("channels"),
     name: v.string(),
+    channelType: v.union(v.literal("public"), v.literal("private")),
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
@@ -127,7 +184,10 @@ export const update = mutation({
 
     const parsedName = args.name.replace(/\s+/g, "-").toLowerCase();
 
-    await ctx.db.patch(args.id, { name: parsedName });
+    await ctx.db.patch(args.id, {
+      name: parsedName,
+      channelType: args.channelType,
+    });
 
     return args.id;
   },
@@ -178,5 +238,438 @@ export const remove = mutation({
     await ctx.db.delete(args.id);
 
     return args.id;
+  },
+});
+
+export const getChannelMembers = query({
+  args: {
+    channelId: v.id("channels"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      return [];
+    }
+
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel) {
+      return [];
+    }
+
+    // Verify user is a member of the workspace
+    const member = await ctx.db
+      .query("members")
+      .withIndex("by_workspace_id_user_id", (q) =>
+        q.eq("workspaceId", channel.workspaceId).eq("userId", userId)
+      )
+      .unique();
+
+    if (!member) {
+      return [];
+    }
+
+    // Get channel members from channelMembers table (works for both public and private)
+    const channelMembers = await ctx.db
+      .query("channelMembers")
+      .withIndex("by_channel_id", (q) => q.eq("channelId", args.channelId))
+      .collect();
+
+    // Create a map of memberId to ownerId for quick lookup
+    const memberOwnerMap = new Map(
+      channelMembers.map((cm) => [cm.memberId, cm.ownerId])
+    );
+
+    const memberIds = channelMembers.map((cm) => cm.memberId);
+    const members = await Promise.all(
+      memberIds.map((memberId) => ctx.db.get(memberId))
+    );
+
+    const validMembers = members.filter(
+      (m): m is NonNullable<typeof m> => m !== null
+    );
+
+    const membersWithUsers = [];
+    for (const member of validMembers) {
+      const user = await populateUser(ctx, member.userId);
+      if (user) {
+        const ownerId = memberOwnerMap.get(member._id);
+        membersWithUsers.push({
+          ...member,
+          user,
+          ownerId,
+        });
+      }
+    }
+
+    return membersWithUsers;
+  },
+});
+
+export const inviteMember = mutation({
+  args: {
+    channelId: v.id("channels"),
+    memberId: v.id("members"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("Unauthorized");
+    }
+
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel) {
+      throw new Error("Channel not found");
+    }
+
+    // Verify user is a member of the workspace
+    const currentMember = await ctx.db
+      .query("members")
+      .withIndex("by_workspace_id_user_id", (q) =>
+        q.eq("workspaceId", channel.workspaceId).eq("userId", userId)
+      )
+      .unique();
+
+    if (!currentMember) {
+      throw new Error("Unauthorized");
+    }
+
+    // Verify the target member is in the same workspace
+    const targetMember = await ctx.db.get(args.memberId);
+    if (!targetMember || targetMember.workspaceId !== channel.workspaceId) {
+      throw new Error("Member not found in workspace");
+    }
+
+    // Check if member is already in the channel
+    const existingMembership = await ctx.db
+      .query("channelMembers")
+      .withIndex("by_channel_id_member_id", (q) =>
+        q.eq("channelId", args.channelId).eq("memberId", args.memberId)
+      )
+      .unique();
+
+    if (existingMembership) {
+      throw new Error("Member is already in this channel");
+    }
+
+    // For private channels, check if there's already an owner and set ownerId if needed
+    // For public channels, ownerId should be undefined
+    let ownerId: Id<"members"> | undefined = undefined;
+
+    if (channel.channelType === "private") {
+      const allChannelMembers = await ctx.db
+        .query("channelMembers")
+        .withIndex("by_channel_id", (q) => q.eq("channelId", args.channelId))
+        .collect();
+
+      // Owner is indicated by ownerId being set and equal to memberId
+      const hasOwner = allChannelMembers.some(
+        (cm) => cm.ownerId !== undefined && cm.ownerId === cm.memberId
+      );
+
+      // Only set ownerId if there's no existing owner
+      ownerId = hasOwner ? undefined : currentMember._id;
+    }
+
+    // Add member to channel
+    await ctx.db.insert("channelMembers", {
+      channelId: args.channelId,
+      memberId: args.memberId,
+      ownerId,
+    });
+
+    return args.memberId;
+  },
+});
+
+export const removeChannelMember = mutation({
+  args: {
+    channelId: v.id("channels"),
+    memberId: v.id("members"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("Unauthorized");
+    }
+
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel) {
+      throw new Error("Channel not found");
+    }
+
+    // Verify user is a member of the workspace
+    const currentMember = await ctx.db
+      .query("members")
+      .withIndex("by_workspace_id_user_id", (q) =>
+        q.eq("workspaceId", channel.workspaceId).eq("userId", userId)
+      )
+      .unique();
+
+    if (!currentMember) {
+      throw new Error("Unauthorized");
+    }
+
+    // Allow removing from both public and private channels
+    // For public channels, only allow self-removal (leaving)
+    // For private channels, allow admin removal or self-removal
+
+    // Find and remove the channel membership
+    const channelMember = await ctx.db
+      .query("channelMembers")
+      .withIndex("by_channel_id_member_id", (q) =>
+        q.eq("channelId", args.channelId).eq("memberId", args.memberId)
+      )
+      .unique();
+
+    if (!channelMember) {
+      throw new Error("Member is not in this channel");
+    }
+
+    // Only admins can remove other members
+    // Regular members can only remove themselves (leave)
+    if (currentMember._id !== args.memberId) {
+      // Removing someone else - must be admin
+      if (currentMember.role !== "admin") {
+        throw new Error("Only admins can remove other members");
+      }
+    }
+    // If removing themselves, allow (anyone can leave)
+
+    await ctx.db.delete(channelMember._id);
+
+    return args.memberId;
+  },
+});
+
+export const getChannelOwner = query({
+  args: {
+    channelId: v.id("channels"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      return null;
+    }
+
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel) {
+      return null;
+    }
+
+    // Verify user is a member of the workspace
+    const member = await ctx.db
+      .query("members")
+      .withIndex("by_workspace_id_user_id", (q) =>
+        q.eq("workspaceId", channel.workspaceId).eq("userId", userId)
+      )
+      .unique();
+
+    if (!member) {
+      return null;
+    }
+
+    // Find the channel member who is the owner
+    const allChannelMembers = await ctx.db
+      .query("channelMembers")
+      .withIndex("by_channel_id", (q) => q.eq("channelId", args.channelId))
+      .collect();
+
+    // Find the member who is the owner (ownerId equals memberId)
+    const ownerMembership = allChannelMembers.find(
+      (cm) => cm.ownerId !== undefined && cm.ownerId === cm.memberId
+    );
+
+    if (!ownerMembership || !ownerMembership.ownerId) {
+      return null;
+    }
+
+    const ownerMember = await ctx.db.get(ownerMembership.ownerId);
+    if (!ownerMember) {
+      return null;
+    }
+
+    const ownerUser = await populateUser(ctx, ownerMember.userId);
+    if (!ownerUser) {
+      return null;
+    }
+
+    return {
+      ...ownerMember,
+      user: ownerUser,
+    };
+  },
+});
+
+export const transferOwnership = mutation({
+  args: {
+    channelId: v.id("channels"),
+    newOwnerMemberId: v.id("members"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("Unauthorized");
+    }
+
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel) {
+      throw new Error("Channel not found");
+    }
+
+    // Verify user is a member of the workspace
+    const currentMember = await ctx.db
+      .query("members")
+      .withIndex("by_workspace_id_user_id", (q) =>
+        q.eq("workspaceId", channel.workspaceId).eq("userId", userId)
+      )
+      .unique();
+
+    if (!currentMember) {
+      throw new Error("Unauthorized");
+    }
+
+    // Only allow for private channels
+    if (channel.channelType !== "private") {
+      throw new Error("Can only transfer ownership of private channels");
+    }
+
+    // Verify the new owner is in the same workspace
+    const newOwnerMember = await ctx.db.get(args.newOwnerMemberId);
+    if (!newOwnerMember || newOwnerMember.workspaceId !== channel.workspaceId) {
+      throw new Error("Member not found in workspace");
+    }
+
+    // Verify the new owner is already a member of the channel
+    const newOwnerMembership = await ctx.db
+      .query("channelMembers")
+      .withIndex("by_channel_id_member_id", (q) =>
+        q.eq("channelId", args.channelId).eq("memberId", args.newOwnerMemberId)
+      )
+      .unique();
+
+    if (!newOwnerMembership) {
+      throw new Error("New owner must be a member of the channel");
+    }
+
+    // Find current owner (if any)
+    const allChannelMembers = await ctx.db
+      .query("channelMembers")
+      .withIndex("by_channel_id", (q) => q.eq("channelId", args.channelId))
+      .collect();
+
+    // Find the current owner's membership (if exists)
+    // Owner is indicated by ownerId being set and equal to memberId
+    const existingOwnerMembership = allChannelMembers.find(
+      (cm) => cm.ownerId !== undefined && cm.ownerId === cm.memberId
+    );
+
+    // Remove ownership from current owner (if exists)
+    if (existingOwnerMembership) {
+      await ctx.db.patch(existingOwnerMembership._id, {
+        ownerId: undefined,
+      });
+    }
+
+    // Set new owner - ownerId should equal memberId to indicate this member is the owner
+    await ctx.db.patch(newOwnerMembership._id, {
+      ownerId: args.newOwnerMemberId,
+    });
+
+    return args.newOwnerMemberId;
+  },
+});
+
+export const isChannelMember = query({
+  args: {
+    channelId: v.id("channels"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      return false;
+    }
+
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel) {
+      return false;
+    }
+
+    // Verify user is a member of the workspace
+    const member = await ctx.db
+      .query("members")
+      .withIndex("by_workspace_id_user_id", (q) =>
+        q.eq("workspaceId", channel.workspaceId).eq("userId", userId)
+      )
+      .unique();
+
+    if (!member) {
+      return false;
+    }
+
+    // For public channels, check if user is in channelMembers
+    // For private channels, they must be in channelMembers to see it
+    const channelMember = await ctx.db
+      .query("channelMembers")
+      .withIndex("by_channel_id_member_id", (q) =>
+        q.eq("channelId", args.channelId).eq("memberId", member._id)
+      )
+      .unique();
+
+    return channelMember !== null;
+  },
+});
+
+export const joinChannel = mutation({
+  args: {
+    channelId: v.id("channels"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("Unauthorized");
+    }
+
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel) {
+      throw new Error("Channel not found");
+    }
+
+    // Verify user is a member of the workspace
+    const member = await ctx.db
+      .query("members")
+      .withIndex("by_workspace_id_user_id", (q) =>
+        q.eq("workspaceId", channel.workspaceId).eq("userId", userId)
+      )
+      .unique();
+
+    if (!member) {
+      throw new Error("Unauthorized");
+    }
+
+    // Only allow joining public channels
+    if (channel.channelType !== "public") {
+      throw new Error("Can only join public channels");
+    }
+
+    // Check if member is already in the channel
+    const existingMembership = await ctx.db
+      .query("channelMembers")
+      .withIndex("by_channel_id_member_id", (q) =>
+        q.eq("channelId", args.channelId).eq("memberId", member._id)
+      )
+      .unique();
+
+    if (existingMembership) {
+      throw new Error("Already a member of this channel");
+    }
+
+    // Add member to channel (no owner for public channels)
+    await ctx.db.insert("channelMembers", {
+      channelId: args.channelId,
+      memberId: member._id,
+      ownerId: undefined,
+    });
+
+    return args.channelId;
   },
 });

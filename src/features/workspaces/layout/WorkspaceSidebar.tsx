@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Hash,
   Loader,
+  Lock,
   MessageSquareText,
   SendHorizontal,
 } from "lucide-react";
@@ -17,11 +18,54 @@ import { UserItem } from "./UserItem";
 import { useCreateChannelModal } from "@/features/channels/store/useCreateChanelModal";
 import { useChannelId } from "@/hooks/use-channel-id";
 import { useMemberId } from "@/hooks/use-member-id";
+import { useIsChannelMember } from "@/features/channels/api/use-is-channel-member";
+import { useJoinChannel } from "@/features/channels/api/use-join-channel";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import { Id } from "../../../../convex/_generated/dataModel";
+
+function ChannelItem({
+  channel,
+  currentChannelId,
+  onJoin,
+  isJoining,
+}: {
+  channel: {
+    _id: Id<"channels">;
+    name: string;
+    channelType: "public" | "private";
+  };
+  currentChannelId: string | null;
+  onJoin: (channelId: Id<"channels">) => void;
+  isJoining: boolean;
+}) {
+  const { data: isMember, isLoading: isLoadingMembership } = useIsChannelMember(
+    {
+      channelId: channel._id,
+    }
+  );
+
+  const showJoinButton =
+    channel.channelType === "public" && !isMember && !isLoadingMembership;
+
+  return (
+    <SidebarItem
+      label={channel.name}
+      icon={channel.channelType === "public" ? Hash : Lock}
+      id={channel._id}
+      variant={currentChannelId === channel._id ? "active" : "default"}
+      showJoinButton={showJoinButton}
+      onJoin={() => onJoin(channel._id)}
+      isJoining={isJoining}
+    />
+  );
+}
 
 export function WorkspaceSidebar() {
   const memberId = useMemberId();
   const channelId = useChannelId();
   const workspaceId = useWorkspaceId();
+  const router = useRouter();
   const [, setOpen] = useCreateChannelModal();
 
   const { data: member, isLoading: isMemberLoading } = useCurrentMember({
@@ -38,6 +82,23 @@ export function WorkspaceSidebar() {
   const { data: members, isLoading: isMembersLoading } = useGetMembers({
     workspaceId,
   });
+
+  const { mutate: joinChannel, isPending: isJoining } = useJoinChannel();
+
+  const handleJoinChannel = (channelId: Id<"channels">) => {
+    joinChannel(
+      { channelId },
+      {
+        onSuccess: () => {
+          toast.success("Joined channel");
+          router.push(`/workspace/${workspaceId}/channel/${channelId}`);
+        },
+        onError: (error) => {
+          toast.error(error.message || "Failed to join channel");
+        },
+      }
+    );
+  };
 
   if (
     isMemberLoading ||
@@ -85,16 +146,16 @@ export function WorkspaceSidebar() {
       <WorkspaceSection
         label="Channels"
         hint="New channel"
-        onNew={member.role === "admin" ? () => setOpen(true) : undefined}
+        onNew={() => setOpen(true)}
         defaultOpen
       >
         {channels.map((item) => (
-          <SidebarItem
-            key={item._id}
-            label={item.name}
-            icon={Hash}
-            id={item._id}
-            variant={channelId === item._id ? "active" : "default"}
+          <ChannelItem
+            key={`${item._id}-${item.channelType}`}
+            channel={item}
+            currentChannelId={channelId}
+            onJoin={handleJoinChannel}
+            isJoining={isJoining}
           />
         ))}
       </WorkspaceSection>

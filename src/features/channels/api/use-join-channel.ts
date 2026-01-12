@@ -11,13 +11,11 @@ type Options = {
 };
 
 type RequestType = {
-  name: string;
-  workspaceId: Id<"workspaces">;
-  channelType: "public" | "private";
+  channelId: Id<"channels">;
 };
 type ResponseType = Id<"channels"> | null;
 
-export function useCreateChannel() {
+export function useJoinChannel() {
   const [data, setData] = useState<ResponseType>(null);
   const [error, setError] = useState<Error | null>(null);
 
@@ -25,7 +23,7 @@ export function useCreateChannel() {
     "success" | "error" | "pending" | "settled" | null
   >(null);
 
-  const mutation = useMutation(api.channels.create);
+  const mutation = useMutation(api.channels.joinChannel);
   const isPending = useMemo(() => status === "pending", [status]);
   const isSuccess = useMemo(() => status === "success", [status]);
   const isError = useMemo(() => status === "error", [status]);

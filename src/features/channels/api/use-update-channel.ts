@@ -10,7 +10,11 @@ type Options = {
   throwError?: boolean;
 };
 
-type RequestType = { id: Id<"channels">; name: string };
+type RequestType = {
+  id: Id<"channels">;
+  name: string;
+  channelType: "public" | "private";
+};
 type ResponseType = Id<"channels"> | null;
 
 export function useUpdateChannel() {
