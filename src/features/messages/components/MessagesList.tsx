@@ -42,11 +42,12 @@ export function MessagesList({
 
   const { data: currentMember } = useCurrentMember({ workspaceId });
 
-  // Play notification sound for new messages
+  // Don't play notification sound for messages in the current view
+  // Global notifications will handle notifications for messages in other channels/conversations
   useNotificationSound({
     messages: data,
     currentMemberId: currentMember?._id,
-    enabled: true,
+    enabled: false,
   });
 
   const groupedMessage = data?.reduce((groups, message) => {

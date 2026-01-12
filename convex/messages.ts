@@ -404,11 +404,44 @@ export const getRecentForNotifications = query({
       .order("desc")
       .take(limit * 2); // Get more to filter out user's own messages
 
-    // Filter out messages sent by the current user and thread replies
-    const relevantMessages = allMessages.filter(
-      (message) =>
-        message.memberId !== currentMember._id && !message.parentMessageId
-    );
+    // Filter messages:
+    // 1. Exclude messages sent by the current user
+    // 2. Exclude thread replies
+    // 3. For conversation messages, only include if current member is a participant
+    const relevantMessages = [];
+    for (const message of allMessages) {
+      // Skip messages sent by current user
+      if (message.memberId === currentMember._id) {
+        continue;
+      }
+      
+      // Skip thread replies
+      if (message.parentMessageId) {
+        continue;
+      }
+
+      // If it's a channel message, include it (public to all workspace members)
+      if (message.channelId) {
+        relevantMessages.push(message);
+        continue;
+      }
+
+      // If it's a conversation message, check if current member is a participant
+      if (message.conversationId) {
+        const conversation = await ctx.db.get(message.conversationId);
+        if (
+          conversation &&
+          (conversation.memberOneId === currentMember._id ||
+            conversation.memberTwoId === currentMember._id)
+        ) {
+          relevantMessages.push(message);
+        }
+        // If conversation doesn't exist or current member is not a participant, skip it
+        continue;
+      }
+
+      // If message has neither channelId nor conversationId, skip it (shouldn't happen, but be safe)
+    }
 
     // Take only the limit
     const messages = relevantMessages.slice(0, limit);
