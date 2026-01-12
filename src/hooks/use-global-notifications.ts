@@ -109,18 +109,19 @@ export function useGlobalNotifications() {
               ? `New message in channel`
               : `${message.user.name}`;
             
-            // Extract plain text from Quill Delta JSON
-            const plainText = extractPlainTextFromQuill(message.body);
-            const body = plainText
-              ? plainText.length > 100
-                ? plainText.substring(0, 100) + "..."
-                : plainText
-              : "New message";
+            // Extract plain text from Quill Delta JSON (async)
+            extractPlainTextFromQuill(message.body).then((plainText) => {
+              const body = plainText
+                ? plainText.length > 100
+                  ? plainText.substring(0, 100) + "..."
+                  : plainText
+                : "New message";
 
-            new Notification(title, {
-              body,
-              icon: message.user.image || undefined,
-              tag: message._id, // Prevent duplicate notifications
+              new Notification(title, {
+                body,
+                icon: message.user.image || undefined,
+                tag: message._id, // Prevent duplicate notifications
+              });
             });
           }
         }

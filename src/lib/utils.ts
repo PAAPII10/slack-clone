@@ -1,6 +1,5 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import Quill from "quill";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -10,12 +9,14 @@ export function cn(...inputs: ClassValue[]) {
  * Extracts plain text from a Quill Delta JSON string
  * Used for browser notifications and other text-only contexts
  */
-export function extractPlainTextFromQuill(quillDeltaJson: string): string {
+export async function extractPlainTextFromQuill(quillDeltaJson: string): Promise<string> {
   if (typeof window === "undefined" || typeof document === "undefined") {
     return "";
   }
 
   try {
+    // Dynamically import Quill to avoid SSR issues
+    const Quill = (await import("quill")).default;
     const delta = JSON.parse(quillDeltaJson);
     const tempDiv = document.createElement("div");
     const quill = new Quill(tempDiv, {
