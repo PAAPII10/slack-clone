@@ -22,7 +22,7 @@ export function WorkspaceSidebar() {
   const memberId = useMemberId();
   const channelId = useChannelId();
   const workspaceId = useWorkspaceId();
-  const [_open, setOpen] = useCreateChannelModal();
+  const [, setOpen] = useCreateChannelModal();
 
   const { data: member, isLoading: isMemberLoading } = useCurrentMember({
     workspaceId,
@@ -68,9 +68,19 @@ export function WorkspaceSidebar() {
         isAdmin={member.role === "admin"}
       />
       <div className="flex flex-col px-2 mt-3">
-        <SidebarItem label="Threads" icon={MessageSquareText} id="threads" />
+        <SidebarItem
+          label="Threads"
+          icon={MessageSquareText}
+          id="threads"
+          href={`/workspace/${workspaceId}/threads`}
+        />
 
-        <SidebarItem label="Drafts & Sent" icon={SendHorizontal} id="drafts" />
+        <SidebarItem
+          label="Drafts & Sent"
+          icon={SendHorizontal}
+          id="drafts"
+          href={`/workspace/${workspaceId}/drafts`}
+        />
       </div>
       <WorkspaceSection
         label="Channels"

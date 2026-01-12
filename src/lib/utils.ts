@@ -9,7 +9,9 @@ export function cn(...inputs: ClassValue[]) {
  * Extracts plain text from a Quill Delta JSON string
  * Used for browser notifications and other text-only contexts
  */
-export async function extractPlainTextFromQuill(quillDeltaJson: string): Promise<string> {
+export async function extractPlainTextFromQuill(
+  quillDeltaJson: string
+): Promise<string> {
   if (typeof window === "undefined" || typeof document === "undefined") {
     return "";
   }
@@ -45,4 +47,13 @@ export async function extractPlainTextFromQuill(quillDeltaJson: string): Promise
     }
     return "";
   }
+}
+
+export function isValidConvexId(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+
+  // Convex Ids are base64url, usually 17–32 chars
+  const CONVEX_ID_REGEX = /^[a-zA-Z0-9_-]{17,32}$/;
+
+  return CONVEX_ID_REGEX.test(value);
 }
