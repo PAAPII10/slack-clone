@@ -35,7 +35,7 @@ interface MessageProps {
     }
   >;
   body: Doc<"messages">["body"];
-  attachments?: Array<string | { url: string; size: number | null }>;
+  attachments?: Array<{ url: string; size: number | null }>;
   image?: string | null | undefined; // Keep for backward compatibility
   updatedAt: Doc<"messages">["updatedAt"];
   createdAt: Doc<"messages">["_creationTime"];
@@ -170,8 +170,8 @@ export function Message({
                     {attachments.map((attachment, index) => (
                       <Thumbnail
                         key={index}
-                        url={typeof attachment === "string" ? attachment : attachment.url}
-                        size={typeof attachment === "string" ? undefined : attachment.size ?? undefined}
+                        url={attachment.url}
+                        size={attachment.size ?? undefined}
                       />
                     ))}
                   </div>

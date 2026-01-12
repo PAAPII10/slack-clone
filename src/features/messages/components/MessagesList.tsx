@@ -134,9 +134,7 @@ export function MessagesList({
                 isAuthor={message.memberId === currentMember?._id}
                 reactions={message.reactions}
                 body={message.body}
-                attachments={message.attachments?.filter(
-                  (img): img is string => img !== null
-                )}
+                attachments={message.attachments}
                 updatedAt={message.updatedAt}
                 createdAt={message._creationTime}
                 isEditing={editingId === message._id}
