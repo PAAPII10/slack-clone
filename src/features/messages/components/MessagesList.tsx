@@ -16,6 +16,7 @@ const TIME_THRESHOLD = 5; // in minutes
 interface MessagesListProps {
   memberName?: string;
   memberImage?: string;
+  memberId?: Id<"members">;
   channelName?: string;
   channelCreationTime?: number;
   variant?: "channel" | "conversation" | "thread";
@@ -28,6 +29,7 @@ interface MessagesListProps {
 export function MessagesList({
   memberName,
   memberImage,
+  memberId,
   channelName,
   channelCreationTime,
   variant = "channel",
@@ -88,7 +90,12 @@ export function MessagesList({
                 id={message._id}
                 memberId={message.memberId}
                 authorImage={message.user.image}
-                authorName={message.user.displayName || message.user.fullName || message.user.name || "Member"}
+                authorName={
+                  message.user.displayName ||
+                  message.user.fullName ||
+                  message.user.name ||
+                  "Member"
+                }
                 isAuthor={message.memberId === currentMember?._id}
                 reactions={message.reactions}
                 body={message.body}
@@ -139,7 +146,11 @@ export function MessagesList({
         <ChannelHero name={channelName} creationTime={channelCreationTime} />
       )}
       {variant === "conversation" && (
-        <ConversationHero name={memberName} image={memberImage} />
+        <ConversationHero
+          name={memberName}
+          image={memberImage}
+          memberId={memberId}
+        />
       )}
     </div>
   );

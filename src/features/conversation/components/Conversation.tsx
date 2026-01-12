@@ -85,16 +85,14 @@ export function Conversation({ id }: ConversationProps) {
       <MessagesList
         data={results}
         loadMore={loadMore}
+        memberId={memberId}
         variant="conversation"
         memberName={displayName}
         memberImage={member?.user.image}
         isLoadingMore={status === "LoadingMore"}
         canLoadMore={status === "CanLoadMore"}
       />
-      <ChatInput
-        conversationId={id}
-        placeholder={`Message ${displayName}`}
-      />
+      <ChatInput conversationId={id} placeholder={`Message ${displayName}`} />
     </div>
   );
 }

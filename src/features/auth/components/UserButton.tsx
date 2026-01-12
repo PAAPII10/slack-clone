@@ -7,15 +7,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useCurrentUser } from "../api/use-current-user";
-import { Loader, LogOut } from "lucide-react";
+import { Loader, LogOut, User } from "lucide-react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { useCurrentMember } from "@/features/members/api/use-current-member";
 import { useMemberOnlineStatus } from "@/features/presence/api/use-presence";
+import { usePanel } from "@/hooks/use-panel";
 
 export function UserButton() {
   const { data, isLoading } = useCurrentUser();
   const { signOut } = useAuthActions();
+  const { onOpenProfile } = usePanel();
   const workspaceId = useWorkspaceId();
   const { data: currentMember } = useCurrentMember({
     workspaceId: workspaceId!,
@@ -62,6 +64,14 @@ export function UserButton() {
         </div>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-60" align="center" side="right">
+        <DropdownMenuItem
+          onClick={() => {
+            if (currentMember?._id) onOpenProfile(currentMember?._id);
+          }}
+        >
+          <User className="size-4 mr-2" />
+          Profile
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={() => signOut()}>
           <LogOut className="size-4 mr-2" />
           Logout
