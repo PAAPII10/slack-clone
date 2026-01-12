@@ -7,6 +7,8 @@ import { MemberHeader } from "@/features/members/components/MemberHeader";
 import { ChatInput } from "./ChatInput";
 import { MessagesList } from "@/features/messages/components/MessagesList";
 import { usePanel } from "@/hooks/use-panel";
+import { useMarkConversationAsRead } from "../api/use-mark-conversation-as-read";
+import { useEffect, useRef } from "react";
 
 interface ConversationProps {
   id: Id<"conversations">;
@@ -20,6 +22,37 @@ export function Conversation({ id }: ConversationProps) {
   });
 
   const { results, status, loadMore } = useGetMessages({ conversationId: id });
+  const { markAsRead } = useMarkConversationAsRead();
+  const lastMessageIdRef = useRef<string | null>(null);
+  const lastConversationIdRef = useRef<string | null>(null);
+
+  // Mark conversation as read when it opens or when new messages arrive
+  useEffect(() => {
+    if (!id) {
+      return;
+    }
+
+    // Reset when conversation changes
+    if (id !== lastConversationIdRef.current) {
+      lastConversationIdRef.current = id;
+      lastMessageIdRef.current = null;
+    }
+
+    // Get the latest message if available
+    const latestMessage = results?.[0];
+    const currentMessageId = latestMessage?._id;
+
+    // Mark as read if:
+    // 1. Conversation just opened (lastMessageIdRef is null)
+    // 2. New message arrived (message ID changed)
+    if (currentMessageId && lastMessageIdRef.current !== currentMessageId) {
+      markAsRead(id, currentMessageId);
+      lastMessageIdRef.current = currentMessageId;
+    } else if (!lastMessageIdRef.current && id) {
+      // Conversation opened but no messages yet - still mark as read
+      markAsRead(id);
+    }
+  }, [id, results, markAsRead]);
 
   if (isMemberLoading || status === "LoadingFirstPage") {
     return (

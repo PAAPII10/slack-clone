@@ -60,12 +60,59 @@ export const get = query({
 
     const members = [];
 
-    for (const member of data) {
-      const user = await populateUser(ctx, member.userId);
+    // Get all conversations for this workspace
+    const conversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_workspace_id", (q) => q.eq("workspaceId", args.workspaceId))
+      .collect();
+
+    // Build a map of memberId -> conversationId for conversations involving current member
+    const memberConversationMap = new Map<Id<"members">, Id<"conversations">>();
+    for (const conversation of conversations) {
+      if (conversation.memberOneId === member._id) {
+        memberConversationMap.set(conversation.memberTwoId, conversation._id);
+      } else if (conversation.memberTwoId === member._id) {
+        memberConversationMap.set(conversation.memberOneId, conversation._id);
+      }
+    }
+
+    // Get unread counts for all conversations involving current member
+    const conversationUnreadCounts = new Map<Id<"conversations">, number>();
+    const readStates = await ctx.db
+      .query("conversationReadState")
+      .withIndex("by_member_id", (q) => q.eq("memberId", member._id))
+      .collect();
+
+    // Build map of conversationId -> unreadCount
+    // Only include conversations that are in memberConversationMap (conversations with other members)
+    const conversationIds = new Set(memberConversationMap.values());
+    for (const readState of readStates) {
+      if (conversationIds.has(readState.conversationId)) {
+        conversationUnreadCounts.set(
+          readState.conversationId,
+          readState.unreadCount
+        );
+      }
+    }
+
+    for (const memberData of data) {
+      // Skip current member
+      if (memberData._id === member._id) {
+        continue;
+      }
+
+      const user = await populateUser(ctx, memberData.userId);
       if (user) {
+        // Get conversation ID and unread count for this member
+        const conversationId = memberConversationMap.get(memberData._id);
+        const unreadCount = conversationId
+          ? conversationUnreadCounts.get(conversationId) ?? 0
+          : 0;
+
         members.push({
-          ...member,
+          ...memberData,
           user,
+          unreadCount,
         });
       }
     }

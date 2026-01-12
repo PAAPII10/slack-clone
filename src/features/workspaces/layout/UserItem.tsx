@@ -12,6 +12,7 @@ interface UserItemProps {
   label?: string;
   image?: string;
   variant?: VariantProps<typeof userItemVariants>["variant"];
+  unreadCount?: number;
 }
 
 const userItemVariants = cva(
@@ -34,37 +35,53 @@ export function UserItem({
   label = "Member",
   image,
   variant,
+  unreadCount = 0,
 }: UserItemProps) {
   const workspaceId = useWorkspaceId();
   const avatarFallback = label.charAt(0).toUpperCase();
   const isOnline = useMemberOnlineStatus({ memberId: id });
+  const hasUnread = unreadCount > 0;
 
   return (
     <Button
       variant="transparent"
       size="sm"
-      className={cn(userItemVariants({ variant }))}
+      className={cn(
+        userItemVariants({ variant }),
+        "relative",
+        hasUnread && "font-semibold"
+      )}
       asChild
     >
-      <Link href={`/workspace/${workspaceId}/member/${id}`}>
-        <div className="relative">
+      <Link href={`/workspace/${workspaceId}/member/${id}`} className="flex items-center w-full">
+        {/* Unread dot indicator - positioned on the left edge like Slack */}
+        {hasUnread && (
+          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-1 rounded-full bg-white shrink-0 z-10" />
+        )}
+        <div className="relative shrink-0">
           <Avatar className="size-5 mr-1">
             <AvatarImage src={image} />
             <AvatarFallback>{avatarFallback}</AvatarFallback>
           </Avatar>
           {isOnline ? (
             <span
-              className="absolute bottom-0 right-0.5 size-2 bg-green-500 border border-[#5E2C5F] rounded-full"
+              className="absolute bottom-0 right-0.5 size-2 bg-green-500 border border-[#5E2C5F] rounded-full z-10"
               aria-label="Online"
             />
           ) : (
             <span
-              className="absolute bottom-0 right-0.5 size-2 bg-gray-400 border border-[#5E2C5F] rounded-full"
+              className="absolute bottom-0 right-0.5 size-2 bg-gray-400 border border-[#5E2C5F] rounded-full z-10"
               aria-label="Offline"
             />
           )}
         </div>
-        <span className="text-sm truncate">{label}</span>
+        <span className="text-sm truncate flex-1">{label}</span>
+        {/* Unread count badge - positioned on the right like Slack */}
+        {hasUnread && unreadCount > 0 && (
+          <span className="ml-auto mr-0 bg-white text-[#481349] text-[11px] font-semibold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-tight shrink-0">
+            {unreadCount > 99 ? "99+" : unreadCount}
+          </span>
+        )}
       </Link>
     </Button>
   );

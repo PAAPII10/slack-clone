@@ -1,11 +1,11 @@
 import { v } from "convex/values";
-import { mutation, query, QueryCtx } from "./_generated/server";
+import { mutation, query, QueryCtx, MutationCtx } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { paginationOptsValidator } from "convex/server";
 
 const getMember = async (
-  ctx: QueryCtx,
+  ctx: QueryCtx | MutationCtx,
   workspaceId: Id<"workspaces">,
   userId: Id<"users">
 ) => {
@@ -16,6 +16,144 @@ const getMember = async (
     )
     .unique();
 };
+
+/**
+ * Get or create read state for a member and channel
+ */
+async function getOrCreateReadState(
+  ctx: MutationCtx,
+  memberId: Id<"members">,
+  channelId: Id<"channels">
+) {
+  const existing = await ctx.db
+    .query("channelReadState")
+    .withIndex("by_member_id_channel_id", (q) =>
+      q.eq("memberId", memberId).eq("channelId", channelId)
+    )
+    .unique();
+
+  if (existing) {
+    return existing;
+  }
+
+  // Create new read state - member just joined, so all existing messages are considered read
+  // We'll set lastReadAt to now, so only future messages will be unread
+  const now = Date.now();
+  const readStateId = await ctx.db.insert("channelReadState", {
+    memberId,
+    channelId,
+    lastReadAt: now,
+    unreadCount: 0,
+  });
+
+  return await ctx.db.get(readStateId);
+}
+
+/**
+ * Increment unread count for all channel members except the sender
+ */
+async function incrementUnreadForChannel(
+  ctx: MutationCtx,
+  channelId: Id<"channels">,
+  messageId: Id<"messages">,
+  senderMemberId: Id<"members">
+) {
+  // Get all channel members
+  const channelMembers = await ctx.db
+    .query("channelMembers")
+    .withIndex("by_channel_id", (q) => q.eq("channelId", channelId))
+    .collect();
+
+  // Increment unread count for each member (except sender)
+  // Note: Active channel check will be handled client-side
+  for (const channelMember of channelMembers) {
+    // Skip sender
+    if (channelMember.memberId === senderMemberId) {
+      continue;
+    }
+
+    // Get or create read state
+    const readState = await getOrCreateReadState(
+      ctx,
+      channelMember.memberId,
+      channelId
+    );
+
+    if (readState) {
+      // Increment unread count
+      await ctx.db.patch(readState._id, {
+        unreadCount: readState.unreadCount + 1,
+      });
+    }
+  }
+}
+
+/**
+ * Get or create read state for a member and conversation
+ */
+async function getOrCreateConversationReadState(
+  ctx: MutationCtx,
+  memberId: Id<"members">,
+  conversationId: Id<"conversations">
+) {
+  const existing = await ctx.db
+    .query("conversationReadState")
+    .withIndex("by_member_id_conversation_id", (q) =>
+      q.eq("memberId", memberId).eq("conversationId", conversationId)
+    )
+    .unique();
+
+  if (existing) {
+    return existing;
+  }
+
+  // Create new read state - all existing messages are considered read
+  const now = Date.now();
+  const readStateId = await ctx.db.insert("conversationReadState", {
+    memberId,
+    conversationId,
+    lastReadAt: now,
+    unreadCount: 0,
+  });
+
+  return await ctx.db.get(readStateId);
+}
+
+/**
+ * Increment unread count for conversation participants except the sender
+ */
+async function incrementUnreadForConversation(
+  ctx: MutationCtx,
+  conversationId: Id<"conversations">,
+  messageId: Id<"messages">,
+  senderMemberId: Id<"members">
+) {
+  // Get conversation to find participants
+  const conversation = await ctx.db.get(conversationId);
+  if (!conversation) {
+    return;
+  }
+
+  // Get the other participant (not the sender)
+  const otherMemberId =
+    conversation.memberOneId === senderMemberId
+      ? conversation.memberTwoId
+      : conversation.memberOneId;
+
+  // Get or create read state for the other participant
+  const readState = await getOrCreateConversationReadState(
+    ctx,
+    otherMemberId,
+    conversationId
+  );
+
+  if (readState) {
+    // Increment unread count
+    await ctx.db.patch(readState._id, {
+      unreadCount: readState.unreadCount + 1,
+    });
+  }
+}
 
 function populateUser(ctx: QueryCtx, id: Id<"users">) {
   return ctx.db.get(id);
@@ -120,6 +258,22 @@ export const create = mutation({
       memberId: member._id,
       conversationId: _conversationId,
     });
+
+    // Increment unread count for channel messages (not threads or conversations)
+    // Thread replies don't increment unread - only top-level messages
+    if (args.channelId && !args.parentMessageId) {
+      await incrementUnreadForChannel(ctx, args.channelId, messageId, member._id);
+    }
+
+    // Increment unread count for conversation messages (not threads)
+    if (_conversationId && !args.parentMessageId) {
+      await incrementUnreadForConversation(
+        ctx,
+        _conversationId,
+        messageId,
+        member._id
+      );
+    }
 
     return messageId;
   },

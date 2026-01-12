@@ -34,6 +34,7 @@ function ChannelItem({
     _id: Id<"channels">;
     name: string;
     channelType: "public" | "private";
+    unreadCount?: number;
   };
   currentChannelId: string | null;
   onJoin: (channelId: Id<"channels">) => void;
@@ -57,6 +58,7 @@ function ChannelItem({
       showJoinButton={showJoinButton}
       onJoin={() => onJoin(channel._id)}
       isJoining={isJoining}
+      unreadCount={channel.unreadCount ?? 0}
     />
   );
 }
@@ -149,15 +151,26 @@ export function WorkspaceSidebar() {
         onNew={() => setOpen(true)}
         defaultOpen
       >
-        {channels.map((item) => (
-          <ChannelItem
-            key={`${item._id}-${item.channelType}`}
-            channel={item}
-            currentChannelId={channelId}
-            onJoin={handleJoinChannel}
-            isJoining={isJoining}
-          />
-        ))}
+        {[...channels]
+          .sort((a, b) => {
+            // Sort by unread count (unread channels first)
+            const aUnread = a.unreadCount ?? 0;
+            const bUnread = b.unreadCount ?? 0;
+            if (aUnread !== bUnread) {
+              return bUnread - aUnread; // Higher unread count first
+            }
+            // If unread counts are equal, maintain original order (by name)
+            return a.name.localeCompare(b.name);
+          })
+          .map((item) => (
+            <ChannelItem
+              key={`${item._id}-${item.channelType}`}
+              channel={item}
+              currentChannelId={channelId}
+              onJoin={handleJoinChannel}
+              isJoining={isJoining}
+            />
+          ))}
       </WorkspaceSection>
       <WorkspaceSection
         label="Direct Messages"
@@ -165,15 +178,27 @@ export function WorkspaceSidebar() {
         onNew={() => {}}
         defaultOpen
       >
-        {members?.map((item) => (
-          <UserItem
-            key={item._id}
-            id={item._id}
-            label={item.user.name}
-            image={item.user.image}
-            variant={memberId === item._id ? "active" : "default"}
-          />
-        ))}
+        {[...(members || [])]
+          .sort((a, b) => {
+            // Sort by unread count (unread conversations first)
+            const aUnread = a.unreadCount ?? 0;
+            const bUnread = b.unreadCount ?? 0;
+            if (aUnread !== bUnread) {
+              return bUnread - aUnread; // Higher unread count first
+            }
+            // If unread counts are equal, maintain original order (by name)
+            return (a?.user?.name || "").localeCompare(b?.user?.name || "");
+          })
+          .map((item) => (
+            <UserItem
+              key={item._id}
+              id={item._id}
+              label={item.user.name}
+              image={item.user.image}
+              variant={memberId === item._id ? "active" : "default"}
+              unreadCount={item.unreadCount ?? 0}
+            />
+          ))}
       </WorkspaceSection>
     </div>
   );

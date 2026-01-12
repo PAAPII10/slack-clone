@@ -12,6 +12,8 @@ import { Hint } from "@/components/Hint";
 import { PreferencesModal } from "./PreferencesModal";
 import { useState } from "react";
 import { InviteModal } from "./InviteModal";
+import { useGetAggregatedUnreadCount } from "@/features/channels/api/use-get-aggregated-unread-count";
+import { useWorkspaceId } from "@/hooks/use-workspace-id";
 
 interface WorkspaceHeaderProps {
   workspace: Doc<"workspaces">;
@@ -20,6 +22,12 @@ interface WorkspaceHeaderProps {
 export function WorkspaceHeader({ workspace, isAdmin }: WorkspaceHeaderProps) {
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const workspaceId = useWorkspaceId();
+  const { data: aggregatedUnreadCount } = useGetAggregatedUnreadCount({
+    workspaceId,
+  });
+  const hasUnread = aggregatedUnreadCount > 0;
+
   return (
     <>
       <InviteModal
@@ -38,10 +46,15 @@ export function WorkspaceHeader({ workspace, isAdmin }: WorkspaceHeaderProps) {
           <DropdownMenuTrigger asChild>
             <Button
               variant="transparent"
-              className="font-semibold text-lg w-auto p-1.5 overflow-hidden"
+              className="font-semibold text-lg w-auto p-1.5 overflow-hidden relative"
               size="sm"
             >
               <span className="truncate">{workspace.name}</span>
+              {hasUnread && (
+                <span className="ml-1.5 bg-white text-[#481349] text-[11px] font-semibold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-tight">
+                  {aggregatedUnreadCount > 99 ? "99+" : aggregatedUnreadCount}
+                </span>
+              )}
               <ChevronDown className="size-4 shrink-0 ml-1" />
             </Button>
           </DropdownMenuTrigger>

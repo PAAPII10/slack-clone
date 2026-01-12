@@ -105,6 +105,21 @@ export const createOrGet = mutation({
       memberTwoId: otherMember._id,
     });
 
+    // Initialize read state for both participants - all existing messages (none) are considered read
+    const now = Date.now();
+    await ctx.db.insert("conversationReadState", {
+      memberId: currentMember._id,
+      conversationId,
+      lastReadAt: now,
+      unreadCount: 0,
+    });
+    await ctx.db.insert("conversationReadState", {
+      memberId: otherMember._id,
+      conversationId,
+      lastReadAt: now,
+      unreadCount: 0,
+    });
+
     return conversationId;
   },
 });

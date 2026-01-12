@@ -102,6 +102,26 @@ const schema = defineSchema({
     .index("by_conversation_id", ["conversationId"])
     .index("by_channel_id_member_id", ["channelId", "memberId"])
     .index("by_conversation_id_member_id", ["conversationId", "memberId"]),
+  channelReadState: defineTable({
+    memberId: v.id("members"),
+    channelId: v.id("channels"),
+    lastReadMessageId: v.optional(v.id("messages")),
+    lastReadAt: v.number(),
+    unreadCount: v.number(),
+  })
+    .index("by_member_id", ["memberId"])
+    .index("by_channel_id", ["channelId"])
+    .index("by_member_id_channel_id", ["memberId", "channelId"]),
+  conversationReadState: defineTable({
+    memberId: v.id("members"),
+    conversationId: v.id("conversations"),
+    lastReadMessageId: v.optional(v.id("messages")),
+    lastReadAt: v.number(),
+    unreadCount: v.number(),
+  })
+    .index("by_member_id", ["memberId"])
+    .index("by_conversation_id", ["conversationId"])
+    .index("by_member_id_conversation_id", ["memberId", "conversationId"]),
 });
 
 export default schema;

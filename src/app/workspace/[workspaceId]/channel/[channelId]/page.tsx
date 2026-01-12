@@ -13,6 +13,8 @@ import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { useMarkChannelAsRead } from "@/features/channels/api/use-mark-channel-as-read";
+import { useEffect, useRef } from "react";
 
 export default function ChannelIdPage() {
   const channelId = useChannelId();
@@ -33,6 +35,37 @@ export default function ChannelIdPage() {
   });
 
   const { mutate: joinChannel, isPending: isJoining } = useJoinChannel();
+  const { markAsRead } = useMarkChannelAsRead();
+  const lastMessageIdRef = useRef<string | null>(null);
+  const lastChannelIdRef = useRef<string | null>(null);
+
+  // Mark channel as read when it opens or when new messages arrive
+  useEffect(() => {
+    if (!channelId || !isMember) {
+      return;
+    }
+
+    // Reset when channel changes
+    if (channelId !== lastChannelIdRef.current) {
+      lastChannelIdRef.current = channelId;
+      lastMessageIdRef.current = null;
+    }
+
+    // Get the latest message if available
+    const latestMessage = results?.[0];
+    const currentMessageId = latestMessage?._id;
+
+    // Mark as read if:
+    // 1. Channel just opened (lastMessageIdRef is null)
+    // 2. New message arrived (message ID changed)
+    if (currentMessageId && lastMessageIdRef.current !== currentMessageId) {
+      markAsRead(channelId, currentMessageId);
+      lastMessageIdRef.current = currentMessageId;
+    } else if (!lastMessageIdRef.current && channelId) {
+      // Channel opened but no messages yet - still mark as read
+      markAsRead(channelId);
+    }
+  }, [channelId, isMember, results, markAsRead]);
 
   const handleJoin = () => {
     joinChannel(

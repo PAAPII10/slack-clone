@@ -40,10 +40,6 @@ export const get = query({
       .withIndex("by_member_id", (q) => q.eq("memberId", member._id))
       .collect();
 
-    if (channelMemberships.length === 0) {
-      return publicChannels;
-    }
-
     // Fetch private channels via memberships
     const privateChannels = await Promise.all(
       channelMemberships.map(async (cm) => {
@@ -58,10 +54,30 @@ export const get = query({
         return null;
       })
     );
-    return [
+
+    const allChannels = [
       ...publicChannels,
       ...privateChannels.filter(Boolean),
     ] as Doc<"channels">[];
+
+    // Get unread counts for all channels
+    const channelsWithUnread = await Promise.all(
+      allChannels.map(async (channel) => {
+        const readState = await ctx.db
+          .query("channelReadState")
+          .withIndex("by_member_id_channel_id", (q) =>
+            q.eq("memberId", member._id).eq("channelId", channel._id)
+          )
+          .unique();
+
+        return {
+          ...channel,
+          unreadCount: readState?.unreadCount ?? 0,
+        };
+      })
+    );
+
+    return channelsWithUnread;
   },
 });
 
@@ -100,6 +116,15 @@ export const create = mutation({
       channelId,
       memberId: member._id,
       ownerId: member._id,
+    });
+
+    // Initialize read state for creator - all existing messages (none) are considered read
+    const now = Date.now();
+    await ctx.db.insert("channelReadState", {
+      memberId: member._id,
+      channelId,
+      lastReadAt: now,
+      unreadCount: 0,
     });
 
     return channelId;
@@ -377,6 +402,16 @@ export const inviteMember = mutation({
       ownerId,
     });
 
+    // Initialize read state - all existing messages are considered read
+    // Only future messages will be unread
+    const now = Date.now();
+    await ctx.db.insert("channelReadState", {
+      memberId: args.memberId,
+      channelId: args.channelId,
+      lastReadAt: now,
+      unreadCount: 0,
+    });
+
     return args.memberId;
   },
 });
@@ -436,6 +471,18 @@ export const removeChannelMember = mutation({
     // If removing themselves, allow (anyone can leave)
 
     await ctx.db.delete(channelMember._id);
+
+    // Clean up read state when member is removed
+    const readState = await ctx.db
+      .query("channelReadState")
+      .withIndex("by_member_id_channel_id", (q) =>
+        q.eq("memberId", args.memberId).eq("channelId", args.channelId)
+      )
+      .unique();
+
+    if (readState) {
+      await ctx.db.delete(readState._id);
+    }
 
     return args.memberId;
   },
@@ -668,6 +715,16 @@ export const joinChannel = mutation({
       channelId: args.channelId,
       memberId: member._id,
       ownerId: undefined,
+    });
+
+    // Initialize read state - all existing messages are considered read
+    // Only future messages will be unread
+    const now = Date.now();
+    await ctx.db.insert("channelReadState", {
+      memberId: member._id,
+      channelId: args.channelId,
+      lastReadAt: now,
+      unreadCount: 0,
     });
 
     return args.channelId;

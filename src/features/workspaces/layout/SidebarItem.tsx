@@ -15,10 +15,11 @@ interface SidebarItemProps {
   showJoinButton?: boolean;
   onJoin?: () => void;
   isJoining?: boolean;
+  unreadCount?: number;
 }
 
 const sidebarItemVariants = cva(
-  "flex items-center justify-start gap-1.5 font-normal h-7 px-[18px] text-sm overflow-hidden",
+  "flex items-center justify-start gap-1.5 h-7 px-[18px] text-sm overflow-hidden",
   {
     variants: {
       variant: {
@@ -41,8 +42,10 @@ export function SidebarItem({
   showJoinButton,
   onJoin,
   isJoining,
+  unreadCount = 0,
 }: SidebarItemProps) {
   const workspaceId = useWorkspaceId();
+  const hasUnread = unreadCount > 0;
 
   const handleJoinClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -56,11 +59,25 @@ export function SidebarItem({
         asChild
         variant="transparent"
         size="sm"
-        className={cn(sidebarItemVariants({ variant }), "flex-1")}
+        className={cn(
+          sidebarItemVariants({ variant }),
+          "flex-1 relative",
+          hasUnread && "font-semibold"
+        )}
       >
-        <Link href={href ? href : `/workspace/${workspaceId}/channel/${id}`}>
+        <Link href={href ? href : `/workspace/${workspaceId}/channel/${id}`} className="flex items-center w-full">
+          {/* Unread dot indicator - positioned on the left edge like Slack */}
+          {hasUnread && (
+            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-1 rounded-full bg-white shrink-0" />
+          )}
           <Icon className="size-3.5 mr-1 shrink-0" />
-          <span className="text-sm truncate">{label}</span>
+          <span className="text-sm truncate flex-1">{label}</span>
+          {/* Unread count badge - positioned on the right like Slack */}
+          {hasUnread && unreadCount > 0 && (
+            <span className="ml-auto mr-0 bg-white text-[#481349] text-[11px] font-semibold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-tight shrink-0">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
         </Link>
       </Button>
       {showJoinButton && (
