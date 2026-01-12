@@ -23,6 +23,7 @@ import { useJoinChannel } from "@/features/channels/api/use-join-channel";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Id } from "../../../../convex/_generated/dataModel";
+import { getUserDisplayName } from "@/lib/user-utils";
 
 function ChannelItem({
   channel,
@@ -187,13 +188,15 @@ export function WorkspaceSidebar() {
               return bUnread - aUnread; // Higher unread count first
             }
             // If unread counts are equal, maintain original order (by name)
-            return (a?.user?.name || "").localeCompare(b?.user?.name || "");
+            const aName = getUserDisplayName(a.user);
+            const bName = getUserDisplayName(b.user);
+            return aName.localeCompare(bName);
           })
           .map((item) => (
             <UserItem
               key={item._id}
               id={item._id}
-              label={item.user.name}
+              label={getUserDisplayName(item.user)}
               image={item.user.image}
               variant={memberId === item._id ? "active" : "default"}
               unreadCount={item.unreadCount ?? 0}

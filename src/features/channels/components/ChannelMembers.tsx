@@ -22,6 +22,7 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { LogOut, UserPlus, Users, X } from "lucide-react";
 import { Loader } from "lucide-react";
 import { Hint } from "@/components/Hint";
+import { getUserDisplayName } from "@/lib/user-utils";
 
 interface ChannelMembersProps {
   channelType: "public" | "private";
@@ -138,10 +139,10 @@ export function ChannelMembers({ channelType }: ChannelMembersProps) {
                         <Avatar className="size-8">
                           <AvatarImage src={member.user.image} />
                           <AvatarFallback>
-                            {member.user.name?.charAt(0).toUpperCase()}
+                            {getUserDisplayName(member.user).charAt(0).toUpperCase()}
                           </AvatarFallback>
                         </Avatar>
-                        <span className="text-sm">{member.user.name}</span>
+                        <span className="text-sm">{getUserDisplayName(member.user)}</span>
                       </div>
                       <Button
                         size="sm"
@@ -178,12 +179,12 @@ export function ChannelMembers({ channelType }: ChannelMembersProps) {
                         <Avatar className="size-8">
                           <AvatarImage src={member.user.image} />
                           <AvatarFallback>
-                            {member.user.name?.charAt(0).toUpperCase()}
+                            {getUserDisplayName(member.user).charAt(0).toUpperCase()}
                           </AvatarFallback>
                         </Avatar>
                         <div className="flex flex-col gap-0.5 flex-1 min-w-0">
                           <span className="text-sm font-medium truncate">
-                            {member.user.name}
+                            {getUserDisplayName(member.user)}
                           </span>
                           <span className="text-xs text-muted-foreground capitalize">
                             {channelMembers?.find((m) => m._id === member._id)

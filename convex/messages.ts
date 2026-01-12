@@ -155,8 +155,21 @@ async function incrementUnreadForConversation(
   }
 }
 
-function populateUser(ctx: QueryCtx, id: Id<"users">) {
-  return ctx.db.get(id);
+async function populateUser(ctx: QueryCtx, id: Id<"users">) {
+  const user = await ctx.db.get(id);
+  if (!user) return null;
+
+  // Get user profile for display name
+  const userProfile = await ctx.db
+    .query("userProfiles")
+    .withIndex("by_user_id", (q) => q.eq("userId", id))
+    .unique();
+
+  return {
+    ...user,
+    displayName: userProfile?.displayName,
+    fullName: userProfile?.fullName,
+  };
 }
 
 function populateMember(ctx: QueryCtx, id: Id<"members">) {
@@ -210,10 +223,13 @@ async function populateThread(ctx: QueryCtx, messageId: Id<"messages">) {
     };
   }
 
+  // Get display name (displayName || fullName || name)
+  const displayName = lastMessageUser.displayName || lastMessageUser.fullName || lastMessageUser.name;
+
   return {
     count: messages.length,
     image: lastMessageUser?.image,
-    name: lastMessageUser?.name,
+    name: displayName,
     timestamp: lastMessage._creationTime,
   };
 }
@@ -328,6 +344,9 @@ export const get = query({
               return null;
             }
 
+            // Get display name (displayName || fullName || name)
+            const displayName = user.displayName || user.fullName || user.name;
+
             const reactions = await populateReactions(ctx, message._id);
 
             const thread = await populateThread(ctx, message._id);
@@ -368,11 +387,17 @@ export const get = query({
               ({ memberId, ...rest }) => rest
             );
 
+            // Get display name (displayName || fullName || name)
+            const userDisplayName = user.displayName || user.fullName || user.name;
+
             return {
               ...message,
               image,
               member,
-              user,
+              user: {
+                ...user,
+                name: userDisplayName, // Use display name as the primary name
+              },
               reactions: reactionWithoutMemberIdProperty,
               threadCount: thread.count,
               threadImage: thread.image,
@@ -622,6 +647,9 @@ export const getRecentForNotifications = query({
           return null;
         }
 
+        // Get display name (displayName || fullName || name)
+        const userDisplayName = user.displayName || user.fullName || user.name;
+
         return {
           _id: message._id,
           body: message.body,
@@ -630,7 +658,7 @@ export const getRecentForNotifications = query({
           conversationId: message.conversationId,
           _creationTime: message._creationTime,
           user: {
-            name: user.name,
+            name: userDisplayName,
             image: user.image,
           },
         };

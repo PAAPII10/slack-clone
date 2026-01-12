@@ -16,6 +16,7 @@ import { useGetChannels } from "@/features/channels/api/use-get-channels";
 import { useGetMembers } from "@/features/members/api/use-get-members";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { useRouter } from "next/navigation";
+import { getUserDisplayName } from "@/lib/user-utils";
 
 export function Toolbar() {
   const router = useRouter();
@@ -75,7 +76,7 @@ export function Toolbar() {
                   key={member._id}
                   onSelect={() => onMemberClick(member._id)}
                 >
-                  {member.user.name}
+                  {getUserDisplayName(member.user)}
                 </CommandItem>
               ))}
             </CommandGroup>

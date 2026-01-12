@@ -3,8 +3,21 @@ import { mutation, query, QueryCtx } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { Doc, Id } from "./_generated/dataModel";
 
-function populateUser(ctx: QueryCtx, id: Id<"users">) {
-  return ctx.db.get(id);
+async function populateUser(ctx: QueryCtx, id: Id<"users">) {
+  const user = await ctx.db.get(id);
+  if (!user) return null;
+
+  // Get user profile for display name
+  const userProfile = await ctx.db
+    .query("userProfiles")
+    .withIndex("by_user_id", (q) => q.eq("userId", id))
+    .unique();
+
+  return {
+    ...user,
+    displayName: userProfile?.displayName,
+    fullName: userProfile?.fullName,
+  };
 }
 
 export const get = query({
@@ -317,10 +330,15 @@ export const getChannelMembers = query({
     for (const member of validMembers) {
       const user = await populateUser(ctx, member.userId);
       if (user) {
+        // Get display name (displayName || fullName || name)
+        const userDisplayName = user.displayName || user.fullName || user.name;
         const ownerId = memberOwnerMap.get(member._id);
         membersWithUsers.push({
           ...member,
-          user,
+          user: {
+            ...user,
+            name: userDisplayName, // Use display name as the primary name
+          },
           ownerId,
         });
       }

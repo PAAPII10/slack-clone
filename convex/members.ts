@@ -103,6 +103,12 @@ export const get = query({
 
       const user = await populateUser(ctx, memberData.userId);
       if (user) {
+        // Get user profile for display name
+        const userProfile = await ctx.db
+          .query("userProfiles")
+          .withIndex("by_user_id", (q) => q.eq("userId", user._id))
+          .unique();
+
         // Get conversation ID and unread count for this member
         const conversationId = memberConversationMap.get(memberData._id);
         const unreadCount = conversationId
@@ -111,7 +117,11 @@ export const get = query({
 
         members.push({
           ...memberData,
-          user,
+          user: {
+            ...user,
+            displayName: userProfile?.displayName,
+            fullName: userProfile?.fullName,
+          },
           unreadCount,
         });
       }
@@ -147,9 +157,21 @@ export const getById = query({
 
     if (!user) return null;
 
+    // Get user profile for display name and additional fields
+    const userProfile = await ctx.db
+      .query("userProfiles")
+      .withIndex("by_user_id", (q) => q.eq("userId", user._id))
+      .unique();
+
     return {
       ...member,
-      user,
+      user: {
+        ...user,
+        displayName: userProfile?.displayName,
+        fullName: userProfile?.fullName,
+        title: userProfile?.title,
+        pronunciation: userProfile?.pronunciation,
+      },
     };
   },
 });

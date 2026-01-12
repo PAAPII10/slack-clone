@@ -20,6 +20,7 @@ import type * as readState from "../readState.js";
 import type * as typing from "../typing.js";
 import type * as upload from "../upload.js";
 import type * as userPreferences from "../userPreferences.js";
+import type * as userProfiles from "../userProfiles.js";
 import type * as users from "../users.js";
 import type * as workspaces from "../workspaces.js";
 
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   typing: typeof typing;
   upload: typeof upload;
   userPreferences: typeof userPreferences;
+  userProfiles: typeof userProfiles;
   users: typeof users;
   workspaces: typeof workspaces;
 }>;

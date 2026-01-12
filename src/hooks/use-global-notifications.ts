@@ -105,9 +105,12 @@ export function useGlobalNotifications() {
           if (Notification.permission === "default") {
             Notification.requestPermission();
           } else if (Notification.permission === "granted") {
-            const title = message.channelId
+            // Get display name (displayName || fullName || name)
+            const user = message.user as { name?: string; displayName?: string; fullName?: string };
+            const userDisplayName = user.displayName || user.fullName || user.name || "Someone";
+            const title: string = message.channelId
               ? `New message in channel`
-              : `${message.user.name}`;
+              : userDisplayName;
             
             // Extract plain text from Quill Delta JSON (async)
             extractPlainTextFromQuill(message.body).then((plainText) => {

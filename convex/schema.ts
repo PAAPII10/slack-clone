@@ -122,6 +122,14 @@ const schema = defineSchema({
     .index("by_member_id", ["memberId"])
     .index("by_conversation_id", ["conversationId"])
     .index("by_member_id_conversation_id", ["memberId", "conversationId"]),
+  userProfiles: defineTable({
+    userId: v.id("users"),
+    fullName: v.optional(v.string()),
+    displayName: v.optional(v.string()),
+    title: v.optional(v.string()),
+    pronunciation: v.optional(v.string()),
+  })
+    .index("by_user_id", ["userId"]),
 });
 
 export default schema;

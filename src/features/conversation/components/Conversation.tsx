@@ -9,6 +9,7 @@ import { MessagesList } from "@/features/messages/components/MessagesList";
 import { usePanel } from "@/hooks/use-panel";
 import { useMarkConversationAsRead } from "../api/use-mark-conversation-as-read";
 import { useEffect, useRef } from "react";
+import { getUserDisplayName } from "@/lib/user-utils";
 
 interface ConversationProps {
   id: Id<"conversations">;
@@ -71,10 +72,12 @@ export function Conversation({ id }: ConversationProps) {
     );
   }
 
+  const displayName = member ? getUserDisplayName(member.user) : "Member";
+
   return (
     <div className="flex flex-col h-full">
       <MemberHeader
-        memberName={member?.user.name}
+        memberName={displayName}
         memberImage={member?.user.image}
         memberId={memberId}
         onClick={() => onOpenProfile(memberId)}
@@ -83,14 +86,14 @@ export function Conversation({ id }: ConversationProps) {
         data={results}
         loadMore={loadMore}
         variant="conversation"
-        memberName={member?.user.name}
+        memberName={displayName}
         memberImage={member?.user.image}
         isLoadingMore={status === "LoadingMore"}
         canLoadMore={status === "CanLoadMore"}
       />
       <ChatInput
         conversationId={id}
-        placeholder={`Message ${member?.user.name}`}
+        placeholder={`Message ${displayName}`}
       />
     </div>
   );

@@ -6,6 +6,7 @@ import {
   ChevronDownIcon,
   Loader,
   MailIcon,
+  Pencil,
   X,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -13,7 +14,6 @@ import { Separator } from "@/components/ui/separator";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -27,6 +27,9 @@ import { toast } from "sonner";
 import { useConfirm } from "@/hooks/use-confirm";
 import { useRouter } from "next/navigation";
 import { useMemberOnlineStatus } from "@/features/presence/api/use-presence";
+import { EditProfileDialog } from "@/features/users/components/EditProfileDialog";
+import { useState } from "react";
+import { getUserDisplayName } from "@/lib/user-utils";
 
 interface ProfileProps {
   memberId: Id<"members">;
@@ -36,6 +39,7 @@ interface ProfileProps {
 export function Profile({ memberId, onClose }: ProfileProps) {
   const router = useRouter();
   const workspaceId = useWorkspaceId();
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
   const { data: currentMember, isLoading: isCurrentMemberLoading } =
     useCurrentMember({ workspaceId });
 
@@ -44,6 +48,7 @@ export function Profile({ memberId, onClose }: ProfileProps) {
   });
 
   const isOnline = useMemberOnlineStatus({ memberId });
+  const isOwnProfile = currentMember?._id === memberId;
 
   const [LeaveConfirmDialog, leaveConfirm] = useConfirm({
     title: "Leave workspace",
@@ -155,13 +160,18 @@ export function Profile({ memberId, onClose }: ProfileProps) {
     );
   }
 
-  const avatarFallback = member.user.name?.charAt(0).toUpperCase();
+  const displayName = getUserDisplayName(member.user);
+  const avatarFallback = displayName.charAt(0).toUpperCase();
 
   return (
     <>
       <LeaveConfirmDialog />
       <RemoveConfirmDialog />
       <UpdateConfirmDialog />
+      <EditProfileDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+      />
       <div className="h-full flex flex-col">
         <div className="h-[49px] flex justify-between items-center px-4 border-b w-full">
           <p className="text-lg font-bold">Profile</p>
@@ -179,8 +189,52 @@ export function Profile({ memberId, onClose }: ProfileProps) {
         </div>
         <div className="flex flex-col p-4">
           <div className="flex items-center gap-2">
-            <p className="text-xl font-bold">{member.user.name}</p>
+            <p className="text-xl font-bold text-foreground">{displayName}</p>
+            {isOwnProfile && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setEditDialogOpen(true)}
+                className="h-7 w-7"
+              >
+                <Pencil className="size-4" />
+              </Button>
+            )}
           </div>
+
+          {/* Profile Details */}
+          {(member.user.fullName ||
+            member.user.title ||
+            member.user.pronunciation) && (
+            <div className="flex flex-col gap-3 mt-2">
+              {member.user.fullName && member.user.fullName !== displayName && (
+                <div className="flex flex-col gap-1">
+                  <p className="text-[13px] font-semibold text-muted-foreground">
+                    Full name
+                  </p>
+                  <p className="text-sm text-foreground">{member.user.fullName}</p>
+                </div>
+              )}
+
+              {member.user.title && (
+                <div className="flex flex-col gap-1">
+                  <p className="text-[13px] font-semibold text-muted-foreground">
+                    Title
+                  </p>
+                  <p className="text-sm text-foreground">{member.user.title}</p>
+                </div>
+              )}
+
+              {member.user.pronunciation && (
+                <div className="flex flex-col gap-1">
+                  <p className="text-[13px] font-semibold text-muted-foreground">
+                    Name pronunciation
+                  </p>
+                  <p className="text-sm text-foreground">{member.user.pronunciation}</p>
+                </div>
+              )}
+            </div>
+          )}
           {currentMember?.role === "admin" &&
           currentMember?._id !== memberId ? (
             <div className="flex items-center gap-2 mt-4 w-fit">
