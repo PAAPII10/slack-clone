@@ -8,6 +8,7 @@ import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { toast } from "sonner";
 import { useGenerateUploadUrl } from "@/features/upload/api/use-generate-upload-url";
 import { Id } from "../../../../convex/_generated/dataModel";
+import { useTyping } from "@/features/typing/api/use-typing";
 
 const Editor = dynamic(() => import("@/components/Editor"), { ssr: false });
 
@@ -30,6 +31,10 @@ export function ChatInput({ placeholder, conversationId }: ChatInputProps) {
 
   const { mutate: createMessage } = useCreateMessage();
   const { mutate: generateUploadUrl } = useGenerateUploadUrl();
+  const { emitTypingStart, emitTypingStop } = useTyping({
+    conversationId,
+    enabled: !!conversationId,
+  });
 
   const editorRef = useRef<Quill | null>(null);
 
@@ -73,6 +78,9 @@ export function ChatInput({ placeholder, conversationId }: ChatInputProps) {
         throwError: true,
       });
 
+      // Stop typing when message is sent
+      emitTypingStop();
+
       setEditorKey((prev) => prev + 1);
     } catch {
       toast.error("Failed to send message");
@@ -83,13 +91,16 @@ export function ChatInput({ placeholder, conversationId }: ChatInputProps) {
   };
 
   return (
-    <div className="px-5 w-full">
+    <div className="w-full px-5">
       <Editor
         key={editorKey}
+        conversationId={conversationId}
         placeholder={placeholder}
         disabled={isPending}
         innerRef={editorRef}
         onSubmit={onSubmit}
+        onTypingStart={emitTypingStart}
+        onTypingStop={emitTypingStop}
       />
     </div>
   );

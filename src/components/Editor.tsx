@@ -14,6 +14,8 @@ import { Hint } from "./Hint";
 import { cn } from "@/lib/utils";
 import { EmojiPopover } from "./emoji-popover";
 import Image from "next/image";
+import { Id } from "../../convex/_generated/dataModel";
+import { TypingIndicator } from "@/features/typing/components/TypingIndicator";
 
 export type EditorValue = {
   image: File | null;
@@ -27,6 +29,10 @@ interface EditorProps {
   innerRef?: RefObject<Quill | null>;
   onCancel?: () => void;
   onSubmit: ({ image, body }: EditorValue) => void;
+  onTypingStart?: () => void;
+  onTypingStop?: () => void;
+  conversationId?: Id<"conversations">;
+  channelId?: Id<"channels">;
 }
 
 export default function Editor({
@@ -37,6 +43,10 @@ export default function Editor({
   innerRef,
   onCancel,
   onSubmit,
+  onTypingStart,
+  onTypingStop,
+  conversationId,
+  channelId,
 }: EditorProps) {
   const [text, setText] = useState("");
   const [image, setImage] = useState<File | null>(null);
@@ -49,12 +59,16 @@ export default function Editor({
   const containerRef = useRef<HTMLDivElement>(null);
   const disabledRef = useRef(disabled);
   const imageElementRef = useRef<HTMLInputElement | null>(null);
+  const onTypingStartRef = useRef(onTypingStart);
+  const onTypingStopRef = useRef(onTypingStop);
 
   useLayoutEffect(() => {
     submitRef.current = onSubmit;
     placeholderRef.current = placeholder;
     defaultValueRef.current = defaultValue;
     disabledRef.current = disabled;
+    onTypingStartRef.current = onTypingStart;
+    onTypingStopRef.current = onTypingStop;
   });
 
   useEffect(() => {
@@ -86,6 +100,11 @@ export default function Editor({
                   !addedImage &&
                   text.replace(/<(.|\n)*?>/g, "").trim().length === 0;
                 if (isEmpty) return;
+
+                // Stop typing when message is sent
+                if (variant === "create" && onTypingStopRef.current) {
+                  onTypingStopRef.current();
+                }
 
                 const body = JSON.stringify(quill.getContents());
                 submitRef.current?.({
@@ -142,7 +161,9 @@ export default function Editor({
     };
 
     // Listen to paste event on the editor element (use capture phase to intercept before Quill)
-    const editorElement = editorContainer.querySelector(".ql-editor") as HTMLElement | null;
+    const editorElement = editorContainer.querySelector(
+      ".ql-editor"
+    ) as HTMLElement | null;
     if (editorElement) {
       editorElement.addEventListener("paste", handlePaste, true);
     }
@@ -151,12 +172,18 @@ export default function Editor({
     const handleTextChange = () => {
       const delta = quill.getContents();
       const hasImage = delta.ops?.some(
-        (op: Op) => op.insert && typeof op.insert === "object" && "image" in op.insert
+        (op: Op) =>
+          op.insert && typeof op.insert === "object" && "image" in op.insert
       );
       if (hasImage) {
         // Remove image ops and keep only text
         const filteredOps = delta.ops?.filter(
-          (op: Op) => !(op.insert && typeof op.insert === "object" && "image" in op.insert)
+          (op: Op) =>
+            !(
+              op.insert &&
+              typeof op.insert === "object" &&
+              "image" in op.insert
+            )
         );
         if (filteredOps && filteredOps.length !== delta.ops?.length) {
           quill.setContents(filteredOps);
@@ -167,11 +194,17 @@ export default function Editor({
     quill.on(Quill.events.TEXT_CHANGE, () => {
       setText(quill.getText());
       handleTextChange();
+      // Emit typing start event when user types
+      if (variant === "create" && onTypingStartRef.current) {
+        onTypingStartRef.current();
+      }
     });
 
     return () => {
       quill.off(Quill.events.TEXT_CHANGE);
-      const editorElement = editorContainer.querySelector(".ql-editor") as HTMLElement | null;
+      const editorElement = editorContainer.querySelector(
+        ".ql-editor"
+      ) as HTMLElement | null;
       if (editorElement) {
         editorElement.removeEventListener("paste", handlePaste, true);
       }
@@ -310,6 +343,10 @@ export default function Editor({
               disabled={disabled || isEmpty}
               size="icon-sm"
               onClick={() => {
+                // Stop typing when message is sent
+                if (onTypingStopRef.current) {
+                  onTypingStopRef.current();
+                }
                 onSubmit({
                   image,
                   body: JSON.stringify(quillRef.current?.getContents()),
@@ -323,15 +360,23 @@ export default function Editor({
       </div>
 
       {variant === "create" && (
-        <div
-          className={cn(
-            "p-2 text-[10px] text-muted-foreground flex justify-end opacity-0 transition",
-            !isEmpty && "opacity-100"
+        <div className="flex items-center justify-between p-2">
+          {(conversationId || channelId) && (
+            <TypingIndicator
+              conversationId={conversationId}
+              channelId={channelId}
+            />
           )}
-        >
-          <p>
-            <strong>Shift + Enter</strong> to add a new line
-          </p>
+          <div
+            className={cn(
+              "text-[10px] text-muted-foreground opacity-0 transition",
+              !isEmpty && "opacity-100"
+            )}
+          >
+            <p>
+              <strong>Shift + Enter</strong> to add a new line
+            </p>
+          </div>
         </div>
       )}
     </div>

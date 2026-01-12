@@ -16,6 +16,7 @@ import type * as members from "../members.js";
 import type * as messages from "../messages.js";
 import type * as presence from "../presence.js";
 import type * as reactions from "../reactions.js";
+import type * as typing from "../typing.js";
 import type * as upload from "../upload.js";
 import type * as userPreferences from "../userPreferences.js";
 import type * as users from "../users.js";
@@ -36,6 +37,7 @@ declare const fullApi: ApiFromModules<{
   messages: typeof messages;
   presence: typeof presence;
   reactions: typeof reactions;
+  typing: typeof typing;
   upload: typeof upload;
   userPreferences: typeof userPreferences;
   users: typeof users;

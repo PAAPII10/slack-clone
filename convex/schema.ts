@@ -90,6 +90,18 @@ const schema = defineSchema({
     .index("by_member_id", ["memberId"])
     .index("by_workspace_id", ["workspaceId"])
     .index("by_workspace_id_member_id", ["workspaceId", "memberId"]),
+  typing: defineTable({
+    memberId: v.id("members"),
+    workspaceId: v.id("workspaces"),
+    channelId: v.optional(v.id("channels")),
+    conversationId: v.optional(v.id("conversations")),
+    lastTypingTime: v.number(),
+  })
+    .index("by_member_id", ["memberId"])
+    .index("by_channel_id", ["channelId"])
+    .index("by_conversation_id", ["conversationId"])
+    .index("by_channel_id_member_id", ["channelId", "memberId"])
+    .index("by_conversation_id_member_id", ["conversationId", "memberId"]),
 });
 
 export default schema;
