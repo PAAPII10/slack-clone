@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { getUserDisplayName } from "@/lib/user-utils";
-import { HuddleBar } from "@/features/huddle/components/HuddleBar";
+import { HuddleCall } from "@/features/huddle/components/HuddleCall";
 
 function ChannelItem({
   channel,
@@ -201,11 +201,12 @@ export function WorkspaceSidebar() {
               image={item.user.image}
               variant={memberId === item._id ? "active" : "default"}
               unreadCount={item.unreadCount ?? 0}
+              isActive={memberId === item._id}
             />
           ))}
       </WorkspaceSection>
       <div className="mt-auto">
-        <HuddleBar />
+        <HuddleCall />
       </div>
     </div>
   );

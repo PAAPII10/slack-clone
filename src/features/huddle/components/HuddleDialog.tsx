@@ -1,17 +1,9 @@
 "use client";
 
+import { useState, useRef, useEffect } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useHuddleState } from "../store/use-huddle-state";
-import { useGetChannel } from "@/features/channels/api/use-get-channel";
-import { useGetMember } from "@/features/members/api/use-get-member";
-import { useCurrentMember } from "@/features/members/api/use-current-member";
-import { useWorkspaceId } from "@/hooks/use-workspace-id";
-import { getUserDisplayName } from "@/lib/user-utils";
-import { useActiveHuddle } from "../api/use-active-huddle";
-import { useHuddleParticipants } from "../api/use-huddle-participants";
-import { useStartOrJoinHuddle } from "../api/use-start-or-join-huddle";
 import { useLeaveHuddle } from "../api/use-leave-huddle";
 import { useHuddleMedia } from "./HuddleMediaProvider";
 import { playHuddleSound } from "@/lib/huddle-sounds";
@@ -31,41 +23,38 @@ import {
   Minimize2,
   X,
   Volume2,
+  Loader2,
 } from "lucide-react";
 import { Id } from "../../../../convex/_generated/dataModel";
-import { useState, useMemo, useRef, useEffect } from "react";
-
-/**
- * HuddleDialog Component
- *
- * PHASE 3: WebRTC Integration
- * - Real-time audio/video using simple-peer (P2P mesh)
- * - Media controls (mute, video, screen share)
- * - Noise cancellation via browser constraints
- * - Convex signaling for WebRTC offers/answers/ICE candidates
- */
+import type { HuddleSharedData } from "./HuddleBar";
+import { useJoinHuddle } from "../api/use-join-huddle";
 
 interface HuddleDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  sharedData: HuddleSharedData;
 }
 
 // Inner component that uses WebRTC hooks
 function HuddleDialogContent({
   open,
   onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const [huddleState, setHuddleState] = useHuddleState();
-  const workspaceId = useWorkspaceId();
-  const { data: currentMember } = useCurrentMember({ workspaceId });
+  sharedData,
+}: HuddleDialogProps) {
+  const {
+    workspaceId,
+    currentMember,
+    effectiveHuddleId,
+    isHuddleActive,
+    huddleTitle,
+    displayParticipants,
+    activeHuddle,
+  } = sharedData;
+
   const [isMaximized, setIsMaximized] = useState(false);
   const [, , openSettings] = useSettingsModal();
   const { settings } = useHuddleAudioSettings();
-  const { mutate: startOrJoinHuddle, isPending: isJoining } =
-    useStartOrJoinHuddle();
+  const { mutate: joinHuddle, isPending: isJoiningHuddle } = useJoinHuddle();
   const { mutate: leaveHuddle } = useLeaveHuddle();
 
   // Media controls from HuddleMediaProvider
@@ -78,52 +67,9 @@ function HuddleDialogContent({
     toggleVideo,
     toggleScreenShare,
     cleanup,
+    remoteStreams,
+    isConnecting,
   } = useHuddleMedia();
-
-  // Get source information
-  // Only fetch when we have a valid source ID
-  const channelIdForQuery =
-    huddleState.huddleSource === "channel" && huddleState.huddleSourceId
-      ? (huddleState.huddleSourceId as Id<"channels">)
-      : ("" as Id<"channels">);
-  const memberIdForQuery =
-    huddleState.huddleSource === "dm" && huddleState.huddleSourceId
-      ? (huddleState.huddleSourceId as Id<"members">)
-      : ("" as Id<"members">);
-
-  const { data: channel } = useGetChannel({ id: channelIdForQuery });
-  const { data: member } = useGetMember({ id: memberIdForQuery });
-
-  // Get active huddle from Convex
-  const sourceId =
-    huddleState.huddleSource === "channel"
-      ? (huddleState.huddleSourceId as Id<"channels">)
-      : huddleState.huddleSource === "dm"
-      ? (huddleState.huddleSourceId as Id<"members">)
-      : null;
-
-  const { data: activeHuddle } = useActiveHuddle({
-    workspaceId,
-    sourceType: huddleState.huddleSource || "channel",
-    sourceId: sourceId || ("" as Id<"channels">),
-  });
-
-  // Use currentHuddleId from state if available (for immediate updates after join)
-  const effectiveHuddleId =
-    huddleState.currentHuddleId || activeHuddle?._id || null;
-
-  // Get participants
-  const { data: participants } = useHuddleParticipants({
-    huddleId: effectiveHuddleId,
-  });
-
-  // Check if huddle is actually active (from Convex or state)
-  const isHuddleActive = huddleState.currentHuddleId
-    ? true
-    : activeHuddle?.isActive ?? false;
-
-  // Get remote streams from media provider (WebRTC is managed there)
-  const { remoteStreams, isConnecting } = useHuddleMedia();
 
   // Video refs for local and remote streams
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -142,6 +88,10 @@ function HuddleDialogContent({
     remoteStreams,
     currentMemberId: currentMember?._id || null,
   });
+
+  // Determine dialog huddle title (with # prefix for channels)
+  const dialogHuddleTitle =
+    activeHuddle?.sourceType === "channel" ? `# ${huddleTitle}` : huddleTitle;
 
   // Update local video element
   useEffect(() => {
@@ -271,92 +221,33 @@ function HuddleDialogContent({
     });
   }, [remoteStreams, settings.outputVolume, settings.selectedSpeakerId]);
 
-  // Determine huddle title
-  const huddleTitle =
-    huddleState.huddleSource === "channel"
-      ? `# ${channel?.name || "Channel"}`
-      : huddleState.huddleSource === "dm"
-      ? getUserDisplayName(member?.user || {})
-      : "Huddle";
-
-  // Process participants for display
-  const displayParticipants = useMemo(() => {
-    if (!participants || !currentMember) return [];
-    return participants.map((p) => ({
-      id: p.memberId,
-      name: getUserDisplayName(p.user),
-      image: (p.user as { image?: string | null })?.image || undefined,
-      isYou: p.memberId === currentMember._id,
-      role: p.role,
-      isMuted: p.isMuted,
-    }));
-  }, [participants, currentMember]);
-
-  // Auto-join when dialog opens if huddle source is set but not active
-  useEffect(() => {
-    if (
-      open &&
-      !isHuddleActive &&
-      huddleState.huddleSource &&
-      sourceId &&
-      workspaceId
-    ) {
-      // Auto-join the huddle when dialog opens
-      startOrJoinHuddle(
-        {
-          workspaceId,
-          sourceType: huddleState.huddleSource,
-          sourceId,
-        },
-        {
-          onSuccess: (huddleId) => {
-            console.log("Auto-joined huddle:", huddleId);
-            // Play join sound
-            playHuddleSound("join");
-            setHuddleState((prev) => ({
-              ...prev,
-              currentHuddleId: huddleId,
-              isHuddleActive: true,
-              isHuddleOpen: true,
-            }));
-          },
-          onError: (error) => {
-            console.error("Failed to auto-join huddle:", error);
-          },
-        }
-      );
-    }
-  }, [
-    open,
-    isHuddleActive,
-    huddleState.huddleSource,
-    sourceId,
-    workspaceId,
-    startOrJoinHuddle,
-    setHuddleState,
-  ]);
+  // Note: Auto-join logic is no longer needed here
+  // HuddleCall component manages active huddle detection via getCurrentUserHuddle
+  // If huddle exists and is active, it will be shown automatically
 
   const handleJoin = () => {
-    if (!workspaceId || !huddleState.huddleSource || !sourceId) return;
+    if (!activeHuddle || !workspaceId) return;
 
-    startOrJoinHuddle(
+    const sourceId =
+      activeHuddle.sourceType === "channel"
+        ? (activeHuddle.channelId as Id<"channels">)
+        : activeHuddle.sourceType === "dm"
+        ? (sharedData.member?._id as Id<"members">)
+        : null;
+
+    if (!activeHuddle.sourceType || !sourceId) return;
+
+    joinHuddle(
       {
         workspaceId,
-        sourceType: huddleState.huddleSource,
-        sourceId,
+        huddleId: activeHuddle._id,
       },
       {
         onSuccess: (huddleId) => {
           console.log("Huddle started/joined successfully:", huddleId);
           // Play join sound
           playHuddleSound("join");
-          // Update state immediately with huddleId to trigger UI update
-          setHuddleState((prev) => ({
-            ...prev,
-            currentHuddleId: huddleId,
-            isHuddleActive: true,
-            isHuddleOpen: true,
-          }));
+          // State will be updated by HuddleCall when huddle data changes
         },
         onError: (error) => {
           console.error("Failed to join huddle:", error);
@@ -373,26 +264,10 @@ function HuddleDialogContent({
     if (huddleIdToLeave) {
       leaveHuddle(huddleIdToLeave, {
         onSuccess: () => {
-          setHuddleState((prev) => ({
-            ...prev,
-            isHuddleActive: false,
-            isHuddleOpen: false,
-            currentHuddleId: null,
-            huddleSource: null,
-            huddleSourceId: null,
-          }));
+          // State will be updated by HuddleCall when huddle data changes
+          console.log("Huddle left successfully");
         },
       });
-    } else {
-      // Fallback: just update local state
-      setHuddleState((prev) => ({
-        ...prev,
-        isHuddleActive: false,
-        isHuddleOpen: false,
-        currentHuddleId: null,
-        huddleSource: null,
-        huddleSourceId: null,
-      }));
     }
   };
 
@@ -444,33 +319,51 @@ function HuddleDialogContent({
             <div className="px-6 py-12 bg-linear-to-br from-purple-50 via-pink-50 to-blue-50 min-h-[320px] flex items-center justify-center">
               <div className="flex items-center gap-8">
                 {displayParticipants.length > 0 ? (
-                  displayParticipants.map((participant) => (
-                    <div
-                      key={participant.id}
-                      className="flex flex-col items-center group"
-                    >
-                      <div className="relative">
-                        <Avatar className="size-24 border-4 border-white shadow-xl transition-transform group-hover:scale-105">
-                          <AvatarImage src={undefined} />
-                          <AvatarFallback className="text-3xl font-bold bg-[#5E2C5F] text-white">
-                            {participant.name.charAt(0).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                        {participant.isYou && (
-                          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-white px-3 py-1 rounded-full shadow-md border border-gray-200">
-                            <span className="text-xs font-semibold text-gray-800">
-                              You
-                            </span>
-                          </div>
-                        )}
+                  displayParticipants.map((participant) => {
+                    const isWaiting = participant.status === "waiting";
+                    return (
+                      <div
+                        key={participant.id}
+                        className="flex flex-col items-center group"
+                      >
+                        <div className="relative">
+                          <Avatar
+                            className={`size-24 border-4 border-white shadow-xl transition-transform group-hover:scale-105 ${
+                              isWaiting ? "opacity-50" : ""
+                            }`}
+                          >
+                            <AvatarImage src={participant.image || undefined} />
+                            <AvatarFallback className="text-3xl font-bold bg-[#5E2C5F] text-white">
+                              {participant.name.charAt(0).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          {isWaiting && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-full">
+                              <Loader2 className="size-8 text-white animate-spin" />
+                            </div>
+                          )}
+                          {participant.isYou && (
+                            <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-white px-3 py-1 rounded-full shadow-md border border-gray-200">
+                              <span className="text-xs font-semibold text-gray-800">
+                                You
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <span
+                          className={`mt-4 text-base font-semibold tracking-tight ${
+                            isWaiting
+                              ? "text-gray-500"
+                              : "text-gray-800"
+                          }`}
+                        >
+                          {participant.isYou
+                            ? "You"
+                            : participant.name.split(" ")[0]}
+                        </span>
                       </div>
-                      <span className="mt-4 text-base font-semibold text-gray-800 tracking-tight">
-                        {participant.isYou
-                          ? "You"
-                          : participant.name.split(" ")[0]}
-                      </span>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <div className="text-gray-500">No participants yet</div>
                 )}
@@ -481,12 +374,12 @@ function HuddleDialogContent({
             <div className="px-6 py-5 bg-white border-t rounded-b-lg">
               <Button
                 onClick={handleJoin}
-                disabled={isJoining}
+                disabled={isJoiningHuddle}
                 className="w-full bg-[#5E2C5F] hover:bg-[#481349] text-white font-semibold py-6 text-base shadow-md hover:shadow-lg transition-all disabled:opacity-50"
                 size="lg"
               >
                 <Headphones className="size-5 mr-2" />
-                {isJoining ? "Joining..." : "Join Huddle"}
+                {isJoiningHuddle ? "Joining..." : "Join Huddle"}
               </Button>
             </div>
           </div>
@@ -521,7 +414,9 @@ function HuddleDialogContent({
           e.preventDefault();
         }}
       >
-        <DialogTitle className="sr-only">Huddle with {huddleTitle}</DialogTitle>
+        <DialogTitle className="sr-only">
+          Huddle with {dialogHuddleTitle}
+        </DialogTitle>
         {/* Thin Header */}
         <div className="bg-white px-6 py-3 flex items-center justify-between shrink-0 border-b border-gray-200">
           <div className="flex items-center gap-3">
@@ -529,7 +424,7 @@ function HuddleDialogContent({
               <Headphones className="size-4 text-white" />
             </div>
             <span className="text-sm text-gray-600 font-medium">
-              {huddleTitle}
+              {dialogHuddleTitle}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -563,6 +458,7 @@ function HuddleDialogContent({
           {displayParticipants.length > 0 ? (
             displayParticipants.map((participant) => {
               const isYou = participant.isYou;
+              const isWaiting = participant.status === "waiting";
               const stream = isYou
                 ? localStream
                 : remoteStreams.get(participant.id);
@@ -583,7 +479,7 @@ function HuddleDialogContent({
                   key={participant.id}
                   className={`flex-1 relative flex flex-col items-center justify-center overflow-hidden rounded-md ${
                     isActiveSpeaker ? "ring-2 ring-[#5E2C5F]" : ""
-                  }`}
+                  } ${isWaiting ? "opacity-50" : ""}`}
                 >
                   {hasVideo ? (
                     <video
@@ -666,6 +562,13 @@ function HuddleDialogContent({
                         </Avatar>
                       </div>
                     </>
+                  )}
+
+                  {/* Loading overlay for waiting participants */}
+                  {isWaiting && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-md z-10">
+                      <Loader2 className="size-12 text-white animate-spin" />
+                    </div>
                   )}
 
                   {/* Participant Name and Status */}
@@ -791,226 +694,30 @@ function HuddleDialogContent({
   );
 }
 
-export function HuddleDialog({ open, onOpenChange }: HuddleDialogProps) {
-  const [huddleState, setHuddleState] = useHuddleState();
-  const workspaceId = useWorkspaceId();
-  const { data: currentMember } = useCurrentMember({ workspaceId });
-  const { mutate: startOrJoinHuddle, isPending: isJoining } =
-    useStartOrJoinHuddle();
+export function HuddleDialog({
+  open,
+  onOpenChange,
+  sharedData,
+}: HuddleDialogProps) {
+  const { isHuddleActive } = sharedData;
 
-  // Get source information
-  const channelIdForQuery =
-    huddleState.huddleSource === "channel" && huddleState.huddleSourceId
-      ? (huddleState.huddleSourceId as Id<"channels">)
-      : ("" as Id<"channels">);
-  const memberIdForQuery =
-    huddleState.huddleSource === "dm" && huddleState.huddleSourceId
-      ? (huddleState.huddleSourceId as Id<"members">)
-      : ("" as Id<"members">);
-
-  const { data: channel } = useGetChannel({ id: channelIdForQuery });
-  const { data: member } = useGetMember({ id: memberIdForQuery });
-
-  // Get active huddle from Convex
-  const sourceId =
-    huddleState.huddleSource === "channel"
-      ? (huddleState.huddleSourceId as Id<"channels">)
-      : huddleState.huddleSource === "dm"
-      ? (huddleState.huddleSourceId as Id<"members">)
-      : null;
-
-  const { data: activeHuddle } = useActiveHuddle({
-    workspaceId,
-    sourceType: huddleState.huddleSource || "channel",
-    sourceId: sourceId || ("" as Id<"channels">),
-  });
-
-  // Use currentHuddleId from state if available (for immediate updates after join)
-  const effectiveHuddleId =
-    huddleState.currentHuddleId || activeHuddle?._id || null;
-
-  // Get participants
-  const { data: participants } = useHuddleParticipants({
-    huddleId: effectiveHuddleId,
-  });
-
-  // Determine huddle title
-  const huddleTitle =
-    huddleState.huddleSource === "channel"
-      ? `# ${channel?.name || "Channel"}`
-      : huddleState.huddleSource === "dm"
-      ? getUserDisplayName(member?.user || {})
-      : "Huddle";
-
-  // Process participants for display
-  const displayParticipants = useMemo(() => {
-    if (!participants || !currentMember) return [];
-    return participants.map((p) => ({
-      id: p.memberId,
-      name: getUserDisplayName(p.user),
-      image: (p.user as { image?: string | null })?.image || undefined,
-      isYou: p.memberId === currentMember._id,
-      role: p.role,
-      isMuted: p.isMuted,
-    }));
-  }, [participants, currentMember]);
-
-  // Check if huddle is actually active (from Convex or state)
-  const isHuddleActive = huddleState.currentHuddleId
-    ? true
-    : activeHuddle?.isActive ?? false;
-
-  // Debug logging
-  useEffect(() => {
-    console.log("HuddleDialog outer render state:", {
-      currentHuddleId: huddleState.currentHuddleId,
-      activeHuddleId: activeHuddle?._id,
-      activeHuddleIsActive: activeHuddle?.isActive,
-      isHuddleActive,
-      open,
-    });
-  }, [huddleState.currentHuddleId, activeHuddle, isHuddleActive, open]);
-
-  const handleJoin = () => {
-    console.log("handleJoin called with state:", {
-      workspaceId,
-      huddleSource: huddleState.huddleSource,
-      huddleSourceId: huddleState.huddleSourceId,
-      sourceId,
-    });
-
-    if (!workspaceId) {
-      console.error("Cannot join huddle: missing workspaceId");
-      alert("Cannot start huddle: Missing workspace");
-      return;
-    }
-
-    if (!huddleState.huddleSource) {
-      console.error("Cannot join huddle: missing huddleSource");
-      alert("Cannot start huddle: Missing source type");
-      return;
-    }
-
-    if (!sourceId) {
-      console.error("Cannot join huddle: missing sourceId", {
-        huddleSourceId: huddleState.huddleSourceId,
-        huddleSource: huddleState.huddleSource,
-      });
-      alert("Cannot start huddle: Missing source ID");
-      return;
-    }
-
-    console.log("Starting/joining huddle with:", {
-      workspaceId,
-      sourceType: huddleState.huddleSource,
-      sourceId,
-    });
-
-    startOrJoinHuddle(
-      {
-        workspaceId,
-        sourceType: huddleState.huddleSource,
-        sourceId,
-      },
-      {
-        onSuccess: (huddleId) => {
-          console.log("Huddle started/joined successfully:", huddleId);
-          // Update state immediately with huddleId to trigger UI update
-          setHuddleState((prev) => ({
-            ...prev,
-            currentHuddleId: huddleId,
-            isHuddleActive: true,
-            isHuddleOpen: true,
-          }));
-        },
-        onError: (error) => {
-          console.error("Failed to join huddle:", error);
-          alert(`Failed to start huddle: ${error.message || "Unknown error"}`);
-        },
-      }
-    );
-  };
-
-  // Show join screen if not active
+  // Show join screen if not active (when not wrapped in HuddleMediaProvider)
   if (!isHuddleActive) {
     return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent
-          className="max-w-md p-0 overflow-hidden"
-          showCloseButton={false}
-          onInteractOutside={(e) => {
-            // Prevent closing when clicking outside
-            e.preventDefault();
-          }}
-        >
-          <DialogTitle className="sr-only">
-            Huddle with {huddleTitle}
-          </DialogTitle>
-          <div className="flex flex-col">
-            {/* Join Header */}
-            <div className="bg-[#5E2C5F] px-6 py-4 flex items-center gap-3 rounded-t-lg">
-              <Headphones className="size-6 text-white" />
-              <h2 className="text-lg font-semibold text-white tracking-tight">
-                Huddle with {huddleTitle}
-              </h2>
-            </div>
-
-            {/* Participant Preview */}
-            <div className="px-6 py-12 bg-linear-to-br from-purple-50 via-pink-50 to-blue-50 min-h-[320px] flex items-center justify-center">
-              <div className="flex items-center gap-8">
-                {displayParticipants.length > 0 ? (
-                  displayParticipants.map((participant) => (
-                    <div
-                      key={participant.id}
-                      className="flex flex-col items-center group"
-                    >
-                      <div className="relative">
-                        <Avatar className="size-24 border-4 border-white shadow-xl transition-transform group-hover:scale-105">
-                          <AvatarImage src={undefined} />
-                          <AvatarFallback className="text-3xl font-bold bg-[#5E2C5F] text-white">
-                            {participant.name.charAt(0).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                        {participant.isYou && (
-                          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-white px-3 py-1 rounded-full shadow-md border border-gray-200">
-                            <span className="text-xs font-semibold text-gray-800">
-                              You
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      <span className="mt-4 text-base font-semibold text-gray-800 tracking-tight">
-                        {participant.isYou
-                          ? "You"
-                          : participant.name.split(" ")[0]}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-gray-500">No participants yet</div>
-                )}
-              </div>
-            </div>
-
-            {/* Join Button */}
-            <div className="px-6 py-5 bg-white border-t rounded-b-lg">
-              <Button
-                onClick={handleJoin}
-                disabled={isJoining}
-                className="w-full bg-[#5E2C5F] hover:bg-[#481349] text-white font-semibold py-6 text-base shadow-md hover:shadow-lg transition-all disabled:opacity-50"
-                size="lg"
-              >
-                <Headphones className="size-5 mr-2" />
-                {isJoining ? "Joining..." : "Join Huddle"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <HuddleDialogContent
+        open={open}
+        onOpenChange={onOpenChange}
+        sharedData={sharedData}
+      />
     );
   }
 
-  // Active huddle - no need to wrap with provider since HuddleBar already provides it
-  // HuddleDialog is rendered inside HuddleBarContent, so it's already within the provider
-  return <HuddleDialogContent open={open} onOpenChange={onOpenChange} />;
+  // Active huddle - use the content component
+  return (
+    <HuddleDialogContent
+      open={open}
+      onOpenChange={onOpenChange}
+      sharedData={sharedData}
+    />
+  );
 }

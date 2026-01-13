@@ -3,13 +3,16 @@ import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { isValidConvexId } from "@/lib/utils";
 
-interface UseCurrentMemberProps {
+interface UseGetIncomingHuddleProps {
   workspaceId?: Id<"workspaces">;
 }
-export function useCurrentMember({ workspaceId }: UseCurrentMemberProps) {
-  const shouldFetch = workspaceId && isValidConvexId(workspaceId);
+
+export function useGetIncomingHuddle({
+  workspaceId,
+}: UseGetIncomingHuddleProps) {
+  const shouldFetch = isValidConvexId(workspaceId);
   const data = useQuery(
-    api.members.current,
+    api.huddles.getIncomingHuddle,
     shouldFetch ? { workspaceId } : "skip"
   );
   const isLoading = data === undefined;

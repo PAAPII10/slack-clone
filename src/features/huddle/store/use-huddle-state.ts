@@ -19,7 +19,7 @@ export interface IncomingHuddle {
   huddleSourceId: Id<"channels"> | Id<"members">;
 }
 
-interface HuddleState {
+export interface HuddleState {
   isHuddleOpen: boolean;
   isHuddleActive: boolean;
   huddleSource: HuddleSource | null;

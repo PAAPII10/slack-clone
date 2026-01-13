@@ -97,7 +97,10 @@ export function AudioVideoSettings() {
             }
           >
             <SelectTrigger id="mic-device" className="w-full min-w-0">
-              <SelectValue placeholder="Select microphone" className="truncate" />
+              <SelectValue
+                placeholder="Select microphone"
+                className="truncate"
+              />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="default">Default Microphone</SelectItem>
@@ -274,7 +277,10 @@ export function AudioVideoSettings() {
               }
             >
               <SelectTrigger id="speaker-device" className="w-full min-w-0">
-                <SelectValue placeholder="Select speaker" className="truncate" />
+                <SelectValue
+                  placeholder="Select speaker"
+                  className="truncate"
+                />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="default">Default Speaker</SelectItem>

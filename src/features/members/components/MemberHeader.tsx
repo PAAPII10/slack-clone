@@ -5,7 +5,7 @@ import { Phone } from "lucide-react";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { useMemberOnlineStatus } from "@/features/presence/api/use-presence";
 import { useHuddleState } from "@/features/huddle/store/use-huddle-state";
-import { useStartOrJoinHuddle } from "@/features/huddle/api/use-start-or-join-huddle";
+import { useStartHuddle } from "@/features/huddle/api/use-start-huddle";
 import { playHuddleSound } from "@/lib/huddle-sounds";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { Hint } from "@/components/Hint";
@@ -28,14 +28,14 @@ export function MemberHeader({
   const isOnline = useMemberOnlineStatus({ memberId });
   const [, setHuddleState] = useHuddleState();
   const workspaceId = useWorkspaceId();
-  const { mutate: startOrJoinHuddle } = useStartOrJoinHuddle();
+  const { mutate: startHuddle } = useStartHuddle();
   const { settings } = useHuddleAudioSettings();
 
   const handleStartHuddle = () => {
     if (!memberId || !workspaceId) return;
-    
+
     // Immediately start/join huddle - no join screen
-    startOrJoinHuddle(
+    startHuddle(
       {
         workspaceId,
         sourceType: "dm",

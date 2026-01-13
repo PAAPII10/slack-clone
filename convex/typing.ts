@@ -257,3 +257,126 @@ export const getTypingUsers = query({
     return typingUsers;
   },
 });
+
+/**
+ * Check if the current user is typing in a conversation
+ * Used to show typing indicator to the recipient
+ */
+export const isCurrentUserTyping = query({
+  args: {
+    conversationId: v.id("conversations"),
+    currentMemberId: v.id("members"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      return false;
+    }
+
+    // Verify the currentMemberId belongs to the authenticated user
+    const currentMember = await ctx.db.get(args.currentMemberId);
+    if (!currentMember || currentMember.userId !== userId) {
+      return false;
+    }
+
+    // Verify user has access to the conversation
+    const conversation = await ctx.db.get(args.conversationId);
+    if (!conversation) {
+      return false;
+    }
+
+    // Verify user is part of this conversation
+    if (
+      conversation.memberOneId !== currentMember._id &&
+      conversation.memberTwoId !== currentMember._id
+    ) {
+      return false;
+    }
+
+    const now = Date.now();
+
+    // Check if current user has an active typing record
+    const typingRecord = await ctx.db
+      .query("typing")
+      .withIndex("by_conversation_id_member_id", (q) =>
+        q
+          .eq("conversationId", args.conversationId)
+          .eq("memberId", args.currentMemberId)
+      )
+      .unique();
+
+    if (!typingRecord) {
+      return false;
+    }
+
+    // Check if typing record is still active (not expired)
+    const isExpired = now - typingRecord.lastTypingTime > TYPING_EXPIRY_MS;
+    return !isExpired;
+  },
+});
+
+/**
+ * Check if a specific member is typing in a conversation
+ * Used to show typing indicator to the current user when another member is typing
+ */
+export const isMemberTyping = query({
+  args: {
+    conversationId: v.id("conversations"),
+    memberId: v.id("members"),
+    currentMemberId: v.id("members"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      return false;
+    }
+
+    // Verify the currentMemberId belongs to the authenticated user
+    const currentMember = await ctx.db.get(args.currentMemberId);
+    if (!currentMember || currentMember.userId !== userId) {
+      return false;
+    }
+
+    // Verify user has access to the conversation
+    const conversation = await ctx.db.get(args.conversationId);
+    if (!conversation) {
+      return false;
+    }
+
+    // Verify user is part of this conversation
+    if (
+      conversation.memberOneId !== currentMember._id &&
+      conversation.memberTwoId !== currentMember._id
+    ) {
+      return false;
+    }
+
+    // Verify the member being checked is the other participant
+    if (
+      conversation.memberOneId !== args.memberId &&
+      conversation.memberTwoId !== args.memberId
+    ) {
+      return false;
+    }
+
+    const now = Date.now();
+
+    // Check if the member has an active typing record
+    const typingRecord = await ctx.db
+      .query("typing")
+      .withIndex("by_conversation_id_member_id", (q) =>
+        q
+          .eq("conversationId", args.conversationId)
+          .eq("memberId", args.memberId)
+      )
+      .unique();
+
+    if (!typingRecord) {
+      return false;
+    }
+
+    // Check if typing record is still active (not expired)
+    const isExpired = now - typingRecord.lastTypingTime > TYPING_EXPIRY_MS;
+    return !isExpired;
+  },
+});

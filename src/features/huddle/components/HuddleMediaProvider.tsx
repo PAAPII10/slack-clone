@@ -13,11 +13,11 @@ import { playHuddleSound } from "@/lib/huddle-sounds";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { useWebRTC } from "../hooks/use-webrtc";
 import { useHuddleState } from "../store/use-huddle-state";
-import { useActiveHuddle } from "../api/use-active-huddle";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { useHuddleAudioSettings } from "../hooks/use-huddle-audio-settings";
 import { getAudioContextConstructor } from "@/lib/audio-context-types";
 import { useUpdateMuteStatus } from "../api/use-update-mute-status";
+import { useGetHuddleByCurrentUser } from "../api/use-get-huddle-by-current-user";
 
 interface HuddleMediaContextValue {
   localStream: MediaStream | null;
@@ -44,7 +44,6 @@ const HuddleMediaContext = createContext<HuddleMediaContextValue | undefined>(
 interface HuddleMediaProviderProps {
   children: ReactNode;
   enabled: boolean;
-  huddleId?: Id<"huddles"> | null;
 }
 
 /**
@@ -55,32 +54,15 @@ interface HuddleMediaProviderProps {
 export function HuddleMediaProvider({
   children,
   enabled,
-  huddleId,
 }: HuddleMediaProviderProps) {
   const workspaceId = useWorkspaceId();
-  const [huddleState] = useHuddleState();
 
-  // Get active huddle if huddleId not provided
-  const sourceId =
-    huddleState.huddleSource === "channel"
-      ? (huddleState.huddleSourceId as Id<"channels">)
-      : huddleState.huddleSource === "dm"
-      ? (huddleState.huddleSourceId as Id<"members">)
-      : null;
+  const { data: activeHuddle } = useGetHuddleByCurrentUser({ workspaceId });
 
-  const { data: activeHuddle } = useActiveHuddle({
-    workspaceId,
-    sourceType: huddleState.huddleSource || "channel",
-    sourceId: sourceId || ("" as Id<"channels">),
-  });
-
-  // Use provided huddleId, or currentHuddleId from state, or activeHuddle
-  const effectiveHuddleId =
-    huddleId || huddleState.currentHuddleId || activeHuddle?._id || null;
-  const isHuddleActive = Boolean(effectiveHuddleId && enabled);
+  const isHuddleActive = activeHuddle && Boolean(activeHuddle && enabled);
   // Audio settings
   const { settings } = useHuddleAudioSettings();
-  
+
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const isAudioEnabled = true;
@@ -89,7 +71,7 @@ export function HuddleMediaProvider({
   const [isMuted, setIsMuted] = useState(settings.startMuted); // Initialize with setting
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  
+
   // Update mute status API
   const { mutate: updateMuteStatus } = useUpdateMuteStatus();
 
@@ -405,12 +387,15 @@ export function HuddleMediaProvider({
     });
 
     // Update backend mute status
-    if (effectiveHuddleId) {
-      updateMuteStatus({ huddleId: effectiveHuddleId, isMuted: newMuted }).catch((err) => {
+    if (activeHuddle) {
+      updateMuteStatus({
+        huddleId: activeHuddle._id,
+        isMuted: newMuted,
+      }).catch((err) => {
         console.error("Failed to update mute status:", err);
       });
     }
-  }, [isMuted, effectiveHuddleId, updateMuteStatus]);
+  }, [isMuted, activeHuddle, updateMuteStatus]);
 
   // Toggle video
   const toggleVideo = useCallback(async () => {
@@ -642,9 +627,9 @@ export function HuddleMediaProvider({
 
   // WebRTC connections - managed here so both HuddleBar and HuddleDialog share the same connections
   const { remoteStreams, isConnecting } = useWebRTC({
-    huddleId: effectiveHuddleId,
+    huddleId: activeHuddle?._id || null,
     localStream,
-    enabled: isHuddleActive && !!effectiveHuddleId,
+    enabled: Boolean(isHuddleActive && activeHuddle?._id),
   });
 
   const value: HuddleMediaContextValue = {

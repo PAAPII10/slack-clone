@@ -4,7 +4,7 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { isValidConvexId } from "@/lib/utils";
 
 interface UseGetMemberProps {
-  id: Id<"members">;
+  id?: Id<"members">;
 }
 
 export function useGetMember({ id }: UseGetMemberProps) {

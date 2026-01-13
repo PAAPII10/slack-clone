@@ -47,7 +47,7 @@ export function HuddleSettingsDialog() {
       console.warn("AudioContext not supported");
       return;
     }
-    
+
     const audioContext = new AudioContextClass();
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();

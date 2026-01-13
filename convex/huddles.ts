@@ -1,5 +1,11 @@
 import { v } from "convex/values";
-import { mutation, query, QueryCtx, MutationCtx } from "./_generated/server";
+import {
+  mutation,
+  query,
+  QueryCtx,
+  MutationCtx,
+  internalMutation,
+} from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { Id } from "./_generated/dataModel";
 
@@ -99,6 +105,35 @@ async function validateConversationAccess(
 /**
  * Helper function to find active huddle by source
  */
+/**
+ * Helper function to find active huddle by source
+ */
+async function findConversationActiveHuddleByMemberId(
+  ctx: QueryCtx,
+  memberId: Id<"members">
+) {
+  const huddleParticipant = await ctx.db
+    .query("huddleParticipants")
+    .withIndex("by_member_id", (q) => q.eq("memberId", memberId))
+    .filter((q) => q.eq(q.field("isActive"), true))
+    .filter((q) => q.eq(q.field("status"), "joined"))
+    .first();
+
+  if (!huddleParticipant) {
+    return null;
+  }
+
+  const huddle = await ctx.db.get(huddleParticipant.huddleId);
+  if (!huddle) {
+    return null;
+  }
+
+  return huddle;
+}
+
+/**
+ * Helper function to find active huddle by source
+ */
 async function findActiveHuddleBySource(
   ctx: QueryCtx,
   sourceType: "channel" | "dm",
@@ -137,7 +172,7 @@ async function getActiveParticipants(
     _id: Id<"huddleParticipants">;
     memberId: Id<"members">;
     role: "host" | "participant";
-    joinedAt: number;
+    joinedAt?: number;
   }>
 > {
   const participants = await ctx.db
@@ -168,7 +203,9 @@ async function promoteNextHost(
   }
 
   // Find first participant (oldest join time) and promote to host
-  const nextHost = participants.sort((a, b) => a.joinedAt - b.joinedAt)[0];
+  const nextHost = participants.sort(
+    (a, b) => (a.joinedAt ?? 0) - (b.joinedAt ?? 0)
+  )[0];
 
   const participantDoc = await ctx.db.get(nextHost._id);
   if (participantDoc) {
@@ -234,16 +271,29 @@ async function getOrCreateConversation(
   return conversationId;
 }
 
+async function getConversationMembers(
+  ctx: QueryCtx,
+  conversationId: Id<"conversations">
+): Promise<Array<Id<"members">>> {
+  const conversation = await ctx.db
+    .query("conversations")
+    .withIndex("by_id", (q) => q.eq("_id", conversationId))
+    .first();
+  if (!conversation) {
+    return [];
+  }
+  return [conversation.memberOneId, conversation.memberTwoId];
+}
+
 /**
- * Start or join a huddle
- * - If active huddle exists for source → join it
- * - Else → create new huddle + join as host
+ * Start a huddle
+ * - Creates a new huddle and joins as host
  *
  * Note: For DMs, sourceId can be either:
  * - conversationId (if already known)
  * - memberId (will be converted to conversationId)
  */
-export const startOrJoinHuddle = mutation({
+export const startHuddle = mutation({
   args: {
     workspaceId: v.id("workspaces"),
     sourceType: v.union(v.literal("channel"), v.literal("dm")),
@@ -254,6 +304,45 @@ export const startOrJoinHuddle = mutation({
     const memberId = await getCurrentMember(ctx, args.workspaceId);
     if (!memberId) {
       throw new Error("Unauthorized");
+    }
+
+    // Before starting a new huddle, mark all existing huddle participants as left
+    const existingParticipants = await ctx.db
+      .query("huddleParticipants")
+      .withIndex("by_member_id", (q) => q.eq("memberId", memberId))
+      .filter((q) => q.eq(q.field("leftAt"), undefined))
+      .filter((q) =>
+        q.or(
+          q.eq(q.field("status"), "joined"),
+          q.eq(q.field("status"), "waiting"),
+          q.eq(q.field("isActive"), true)
+        )
+      )
+      .collect();
+
+    const now = Date.now();
+    for (const participant of existingParticipants) {
+      const huddle = await ctx.db.get(participant.huddleId);
+      if (huddle?.isActive) {
+        const count = await ctx.db
+          .query("huddleParticipants")
+          .withIndex("by_huddle_id", (q) => q.eq("huddleId", huddle._id))
+          .filter((q) => q.eq(q.field("leftAt"), undefined))
+          .filter((q) => q.eq(q.field("status"), "joined"))
+          .collect();
+        if (count.length === 1) {
+          await ctx.db.patch(huddle._id, {
+            status: "ended",
+            endedAt: now,
+            isActive: false,
+          });
+        }
+      }
+      await ctx.db.patch(participant._id, {
+        status: "left",
+        isActive: true,
+        leftAt: participant.leftAt ?? now,
+      });
     }
 
     let actualSourceId: Id<"channels"> | Id<"conversations">;
@@ -287,7 +376,7 @@ export const startOrJoinHuddle = mutation({
           memberId,
           asConversationId
         );
-        
+
         if (hasAccess) {
           // It's a valid conversationId and member has access
           actualSourceId = asConversationId;
@@ -327,68 +416,41 @@ export const startOrJoinHuddle = mutation({
       }
     }
 
-    // Find active huddle
-    const existingHuddle = await findActiveHuddleBySource(
-      ctx,
-      args.sourceType,
-      actualSourceId
-    );
-
-    if (existingHuddle) {
-      // Join existing huddle
-      // Check if already a participant
-      const existingParticipant = await ctx.db
-        .query("huddleParticipants")
-        .withIndex("by_huddle_id_member_id", (q) =>
-          q.eq("huddleId", existingHuddle._id).eq("memberId", memberId)
-        )
-        .unique();
-
-      if (existingParticipant) {
-        // Already a participant - if they left, rejoin
-        if (existingParticipant.leftAt) {
-          await ctx.db.patch(existingParticipant._id, {
-            leftAt: undefined,
-            joinedAt: Date.now(),
-            isMuted: args.startMuted ?? false,
-          });
-        }
-        return existingHuddle._id;
-      }
-
-      // Join as new participant
-      await ctx.db.insert("huddleParticipants", {
-        huddleId: existingHuddle._id,
-        memberId,
-        joinedAt: Date.now(),
-        role: "participant",
-        isMuted: args.startMuted ?? false,
-      });
-
-      return existingHuddle._id;
-    }
-
     // Create new huddle
-    const now = Date.now();
     const huddleId = await ctx.db.insert("huddles", {
       workspaceId: args.workspaceId,
       sourceType: args.sourceType,
       channelId,
       conversationId,
       createdBy: memberId,
-      isActive: true,
       createdAt: now,
       startedAt: now,
+      status: "attempted",
+      isActive: true,
     });
 
+    if (!huddleId) {
+      throw new Error("Failed to create new huddle");
+    }
+
     // Join as host
-    await ctx.db.insert("huddleParticipants", {
-      huddleId,
-      memberId,
-      joinedAt: Date.now(),
-      role: "host",
-      isMuted: args.startMuted ?? false,
-    });
+    const members = await getConversationMembers(
+      ctx,
+      actualSourceId as Id<"conversations">
+    );
+
+    for (const mId of members) {
+      // Join as new participant
+      await ctx.db.insert("huddleParticipants", {
+        huddleId,
+        memberId: mId,
+        joinedAt: mId === memberId ? Date.now() : undefined,
+        role: mId === memberId ? "host" : "participant",
+        isMuted: args.startMuted ?? false,
+        isActive: true,
+        status: mId === memberId ? "joined" : "waiting",
+      });
+    }
 
     return huddleId;
   },
@@ -404,11 +466,16 @@ export const joinHuddle = mutation({
   },
   handler: async (ctx, args) => {
     const huddle = await ctx.db.get(args.huddleId);
-    if (!huddle || !huddle.isActive) {
-      throw new Error("Huddle not found or not active");
+    if (!huddle) {
+      throw new Error("Huddle not found");
+    }
+
+    if (!huddle.isActive) {
+      throw new Error("Huddle not active");
     }
 
     const memberId = await getCurrentMember(ctx, huddle.workspaceId);
+
     if (!memberId) {
       throw new Error("Unauthorized");
     }
@@ -449,6 +516,12 @@ export const joinHuddle = mutation({
           leftAt: undefined,
           joinedAt: Date.now(),
           isMuted: args.startMuted ?? false,
+          status: "joined",
+        });
+
+        await ctx.db.patch(args.huddleId, {
+          status: "started",
+          isActive: true,
         });
       }
       // Already a participant
@@ -462,6 +535,13 @@ export const joinHuddle = mutation({
       joinedAt: Date.now(),
       role: "participant",
       isMuted: args.startMuted ?? false,
+      isActive: true,
+      status: "joined",
+    });
+
+    await ctx.db.patch(args.huddleId, {
+      status: "started",
+      isActive: true,
     });
 
     return args.huddleId;
@@ -544,7 +624,11 @@ export const leaveHuddle = mutation({
     const now = Date.now();
 
     // Mark as left
-    await ctx.db.patch(participant._id, { leftAt: now });
+    await ctx.db.patch(participant._id, {
+      leftAt: now,
+      isActive: false,
+      status: "left",
+    });
 
     // Get remaining active participants
     const remainingParticipants = await getActiveParticipants(
@@ -552,30 +636,64 @@ export const leaveHuddle = mutation({
       args.huddleId
     );
 
-    if (isHost && remainingParticipants.length > 0) {
-      // Promote next host
-      await promoteNextHost(ctx, args.huddleId);
-    } else if (remainingParticipants.length === 0) {
-      // Last participant left - end huddle
+    // For 1-on-1 DM huddles, delete all signals and end huddle immediately
+    if (huddle.sourceType === "dm") {
+      // Delete all signals for this huddle
+      const allSignals = await ctx.db
+        .query("huddleSignals")
+        .withIndex("by_huddle_id", (q) => q.eq("huddleId", args.huddleId))
+        .collect();
+
+      for (const signal of allSignals) {
+        await ctx.db.delete(signal._id);
+      }
+
+      // Mark all remaining participants as left
+      for (const p of remainingParticipants) {
+        const participantDoc = await ctx.db.get(p._id);
+        if (participantDoc) {
+          await ctx.db.patch(p._id, {
+            leftAt: now,
+            isActive: false,
+            status: "left",
+          });
+        }
+      }
+
+      // End the huddle and mark as hungup (no participants left)
       await ctx.db.patch(args.huddleId, {
-        isActive: false,
+        status: "ended",
         endedAt: now,
+        isActive: false,
       });
+    } else {
+      // For channel huddles, use normal behavior
+      if (isHost && remainingParticipants.length > 0) {
+        // Promote next host
+        await promoteNextHost(ctx, args.huddleId);
+      } else if (remainingParticipants.length === 0) {
+        await ctx.db.patch(args.huddleId, {
+          status: "ended",
+          endedAt: now,
+          isActive: false,
+        });
+      }
     }
   },
 });
 
 /**
- * End a huddle (host only)
+ * Decline an incoming huddle invitation
+ * Sets hungup: true and schedules deletion after 20 seconds
  */
-export const endHuddle = mutation({
+export const declineHuddle = mutation({
   args: {
     huddleId: v.id("huddles"),
   },
   handler: async (ctx, args) => {
     const huddle = await ctx.db.get(args.huddleId);
-    if (!huddle || !huddle.isActive) {
-      throw new Error("Huddle not found or not active");
+    if (!huddle) {
+      throw new Error("Huddle not found");
     }
 
     const memberId = await getCurrentMember(ctx, huddle.workspaceId);
@@ -583,23 +701,76 @@ export const endHuddle = mutation({
       throw new Error("Unauthorized");
     }
 
-    // Check if user is host
-    const participant = await ctx.db
-      .query("huddleParticipants")
-      .withIndex("by_huddle_id_member_id", (q) =>
-        q.eq("huddleId", args.huddleId).eq("memberId", memberId)
-      )
-      .unique();
+    const now = Date.now();
 
-    if (!participant || participant.role !== "host" || participant.leftAt) {
-      throw new Error("Only host can end huddle");
+    // Delete all signals for this huddle
+    const allSignals = await ctx.db
+      .query("huddleSignals")
+      .withIndex("by_huddle_id", (q) => q.eq("huddleId", args.huddleId))
+      .collect();
+
+    for (const signal of allSignals) {
+      await ctx.db.delete(signal._id);
     }
 
-    // End huddle
+    // Mark all participants as left
+    const allParticipants = await ctx.db
+      .query("huddleParticipants")
+      .withIndex("by_huddle_id", (q) => q.eq("huddleId", args.huddleId))
+      .collect();
+
+    for (const participant of allParticipants) {
+      if (!participant.leftAt) {
+        await ctx.db.patch(participant._id, {
+          leftAt: now,
+          isActive: false,
+          status: "left",
+        });
+      }
+    }
+
+    // Mark huddle as hungup and inactive
     await ctx.db.patch(args.huddleId, {
+      status: "declined",
+      endedAt: now,
       isActive: false,
-      endedAt: Date.now(),
     });
+
+    return args.huddleId;
+  },
+});
+
+/**
+ * Internal mutation to delete a huddle and all its data
+ * Called by scheduler after 20 seconds when huddle is declined
+ */
+export const deleteHuddleData = internalMutation({
+  args: {
+    huddleId: v.id("huddles"),
+  },
+  handler: async (ctx, args) => {
+    // Delete all signals for this huddle
+    const allSignals = await ctx.db
+      .query("huddleSignals")
+      .withIndex("by_huddle_id", (q) => q.eq("huddleId", args.huddleId))
+      .collect();
+
+    for (const signal of allSignals) {
+      await ctx.db.delete(signal._id);
+    }
+
+    // Delete all participants for this huddle
+    const allParticipants = await ctx.db
+      .query("huddleParticipants")
+      .withIndex("by_huddle_id", (q) => q.eq("huddleId", args.huddleId))
+      .collect();
+
+    for (const participant of allParticipants) {
+      await ctx.db.delete(participant._id);
+    }
+
+    // Delete the huddle itself
+    await ctx.db.delete(args.huddleId);
   },
 });
 
@@ -609,66 +780,16 @@ export const endHuddle = mutation({
  * Note: For DMs, sourceId can be either conversationId or memberId
  * If memberId is provided, workspaceId is required to resolve it
  */
-export const getActiveHuddleBySource = query({
+export const getActiveHuddleByMemberId = query({
   args: {
     workspaceId: v.optional(v.id("workspaces")),
     sourceType: v.union(v.literal("channel"), v.literal("dm")),
-    sourceId: v.union(v.id("channels"), v.id("conversations"), v.id("members")),
+    memberId: v.id("members"),
   },
   handler: async (ctx, args) => {
-    let actualSourceId: Id<"channels"> | Id<"conversations">;
-
-    if (args.sourceType === "channel") {
-      actualSourceId = args.sourceId as Id<"channels">;
-    } else {
-      // For DMs, try to resolve memberId to conversationId
-      const asConversationId = args.sourceId as Id<"conversations">;
-      const conversation = await ctx.db.get(asConversationId);
-
-      if (conversation) {
-        actualSourceId = asConversationId;
-      } else if (args.workspaceId) {
-        // It's a memberId - need to find existing conversation
-        const memberId = await getCurrentMember(ctx, args.workspaceId);
-        if (!memberId) {
-          return null;
-        }
-
-        const otherMemberId = args.sourceId as Id<"members">;
-        // Find existing conversation (don't create in query)
-        const existingConversation = await ctx.db
-          .query("conversations")
-          .filter((q) => q.eq(q.field("workspaceId"), args.workspaceId))
-          .filter((q) =>
-            q.or(
-              q.and(
-                q.eq(q.field("memberOneId"), memberId),
-                q.eq(q.field("memberTwoId"), otherMemberId)
-              ),
-              q.and(
-                q.eq(q.field("memberOneId"), otherMemberId),
-                q.eq(q.field("memberTwoId"), memberId)
-              )
-            )
-          )
-          .first();
-
-        if (!existingConversation) {
-          // Conversation doesn't exist yet - can't find huddle
-          return null;
-        }
-
-        actualSourceId = existingConversation._id;
-      } else {
-        // Can't resolve memberId without workspaceId
-        return null;
-      }
-    }
-
-    const huddle = await findActiveHuddleBySource(
+    const huddle = await findConversationActiveHuddleByMemberId(
       ctx,
-      args.sourceType,
-      actualSourceId
+      args.memberId
     );
     if (!huddle) {
       return null;
@@ -686,6 +807,86 @@ export const getActiveHuddleBySource = query({
       startedAt: huddle.startedAt,
       endedAt: huddle.endedAt,
       duration: calculateDuration(huddle.startedAt, huddle.endedAt),
+      status: huddle.status,
+    };
+  },
+});
+
+/**
+ * Check if a huddle is hungup (by ID)
+ * Used to detect when a call was declined
+ */
+export const getHuddleByMemberId = query({
+  args: {
+    memberId: v.id("members"),
+  },
+  handler: async (ctx, args) => {
+    const huddle = await findConversationActiveHuddleByMemberId(
+      ctx,
+      args.memberId
+    );
+    if (!huddle) {
+      return null;
+    }
+    return huddle;
+  },
+});
+
+/**
+ * Get huddle by ID
+ */
+export const getHuddleById = query({
+  args: {
+    id: v.id("huddles"),
+  },
+  handler: async (ctx, args) => {
+    const huddle = await ctx.db.get(args.id);
+    if (!huddle) {
+      return null;
+    }
+    return huddle;
+  },
+});
+
+/**
+ * Get huddle by ID
+ */
+export const getCurrentUserHuddle = query({
+  args: {
+    workspaceId: v.id("workspaces"),
+  },
+  handler: async (ctx, args) => {
+    const memberId = await getCurrentMember(ctx, args.workspaceId);
+
+    if (!memberId) {
+      return null;
+    }
+
+    const huddle = await findConversationActiveHuddleByMemberId(ctx, memberId);
+    if (!huddle) {
+      return null;
+    }
+    const participants = await getActiveParticipants(ctx, huddle._id);
+    const populatedParticipants = await Promise.all(
+      participants.map(async (p) => {
+        const member = await ctx.db.get(p.memberId);
+        if (!member) return null;
+        const user = await populateUser(ctx, member.userId);
+        if (!member) {
+          return null;
+        }
+        // Get full participant record to include status
+        const fullParticipant = await ctx.db.get(p._id);
+        return {
+          ...user,
+          member,
+          participantStatus: fullParticipant?.status ?? "joined",
+        };
+      })
+    );
+    return {
+      ...huddle,
+      participants: populatedParticipants,
     };
   },
 });
@@ -735,13 +936,14 @@ export const getHuddleParticipants = query({
 
         // Get full participant record to include mute status
         const fullParticipant = await ctx.db.get(p._id);
-        
+
         return {
           _id: p._id,
           memberId: p.memberId,
           role: p.role,
           joinedAt: p.joinedAt,
           isMuted: fullParticipant?.isMuted ?? false,
+          isActive: fullParticipant?.isActive ?? true,
           user,
         };
       })
@@ -753,6 +955,7 @@ export const getHuddleParticipants = query({
       role: "host" | "participant";
       joinedAt: number;
       isMuted: boolean;
+      isActive: boolean;
       user: {
         _id: Id<"users">;
         name: string;
@@ -767,139 +970,21 @@ export const getHuddleParticipants = query({
 /**
  * Get my active huddle in a workspace
  */
-export const getMyActiveHuddle = query({
+export const getMyActiveHuddleByChannelId = query({
   args: {
-    workspaceId: v.id("workspaces"),
+    channelId: v.id("channels"),
   },
   handler: async (ctx, args) => {
-    const memberId = await getCurrentMember(ctx, args.workspaceId);
-    if (!memberId) {
+    const huddle = await findActiveHuddleBySource(
+      ctx,
+      "channel",
+      args.channelId
+    );
+    if (!huddle) {
       return null;
     }
 
-    // Find all active participants for this member
-    const myParticipants = await ctx.db
-      .query("huddleParticipants")
-      .withIndex("by_member_id", (q) => q.eq("memberId", memberId))
-      .filter((q) => q.eq(q.field("leftAt"), undefined))
-      .collect();
-
-    // Find active huddles
-    for (const participant of myParticipants) {
-      const huddle = await ctx.db.get(participant.huddleId);
-      if (
-        huddle &&
-        huddle.isActive &&
-        huddle.workspaceId === args.workspaceId
-      ) {
-        // For DM huddles, get the other member's ID
-        let otherMemberId: Id<"members"> | undefined;
-        if (huddle.sourceType === "dm" && huddle.conversationId) {
-          const conversation = await ctx.db.get(huddle.conversationId);
-          if (conversation) {
-            // Get the other member (not the current member)
-            otherMemberId = conversation.memberOneId === memberId
-              ? conversation.memberTwoId
-              : conversation.memberOneId;
-          }
-        }
-
-        return {
-          _id: huddle._id,
-          workspaceId: huddle.workspaceId,
-          sourceType: huddle.sourceType,
-          channelId: huddle.channelId,
-          conversationId: huddle.conversationId,
-          otherMemberId, // For DM huddles
-          createdBy: huddle.createdBy,
-          isActive: huddle.isActive,
-          createdAt: huddle.createdAt,
-          startedAt: huddle.startedAt,
-          endedAt: huddle.endedAt,
-          duration: calculateDuration(huddle.startedAt, huddle.endedAt),
-          myRole: participant.role,
-        };
-      }
-    }
-
-    return null;
-  },
-});
-
-/**
- * Get all active huddles in a workspace
- * Used for notifications - returns huddles the user might want to join
- */
-export const getActiveHuddlesForWorkspace = query({
-  args: {
-    workspaceId: v.id("workspaces"),
-  },
-  handler: async (ctx, args) => {
-    const memberId = await getCurrentMember(ctx, args.workspaceId);
-    if (!memberId) {
-      return [];
-    }
-
-    // Get all active huddles in the workspace
-    const activeHuddles = await ctx.db
-      .query("huddles")
-      .withIndex("by_workspace_id", (q) => q.eq("workspaceId", args.workspaceId))
-      .filter((q) => q.eq(q.field("isActive"), true))
-      .collect();
-
-    // Filter to only huddles the user has access to
-    const accessibleHuddles = [];
-    for (const huddle of activeHuddles) {
-      let hasAccess = false;
-
-      if (huddle.sourceType === "channel" && huddle.channelId) {
-        // Check if user is a member of the channel
-        const channelMembership = await ctx.db
-          .query("channelMembers")
-          .withIndex("by_channel_id_member_id", (q) =>
-            q.eq("channelId", huddle.channelId!).eq("memberId", memberId)
-          )
-          .unique();
-        hasAccess = !!channelMembership;
-      } else if (huddle.sourceType === "dm" && huddle.conversationId) {
-        // Check if user is a participant in the conversation
-        const conversation = await ctx.db.get(huddle.conversationId);
-        hasAccess =
-          !!conversation &&
-          (conversation.memberOneId === memberId ||
-            conversation.memberTwoId === memberId);
-      }
-
-      if (hasAccess) {
-        // For DM huddles, get the other member's ID
-        let otherMemberId: Id<"members"> | undefined;
-        if (huddle.sourceType === "dm" && huddle.conversationId) {
-          const conversation = await ctx.db.get(huddle.conversationId);
-          if (conversation) {
-            // Get the other member (not the current member)
-            otherMemberId = conversation.memberOneId === memberId
-              ? conversation.memberTwoId
-              : conversation.memberOneId;
-          }
-        }
-
-        accessibleHuddles.push({
-          _id: huddle._id,
-          workspaceId: huddle.workspaceId,
-          sourceType: huddle.sourceType,
-          channelId: huddle.channelId,
-          conversationId: huddle.conversationId,
-          createdBy: huddle.createdBy,
-          isActive: huddle.isActive,
-          createdAt: huddle.createdAt,
-          startedAt: huddle.startedAt,
-          endedAt: huddle.endedAt,
-          otherMemberId, // For DM huddles, the other member's ID
-        });
-      }
-    }
-
-    return accessibleHuddles;
+    return huddle;
   },
 });
 
@@ -1049,5 +1134,109 @@ export const clearOldSignals = mutation({
     for (const signal of oldSignals) {
       await ctx.db.delete(signal._id);
     }
+  },
+});
+
+export const getIncomingHuddle = query({
+  args: {
+    workspaceId: v.id("workspaces"),
+  },
+  handler: async (ctx, args) => {
+    const memberId = await getCurrentMember(ctx, args.workspaceId);
+    if (!memberId) {
+      return null;
+    }
+
+    const huddleParticipant = await ctx.db
+      .query("huddleParticipants")
+      .withIndex("by_member_id", (q) => q.eq("memberId", memberId))
+      .filter((q) => q.eq(q.field("status"), "waiting"))
+      .first();
+
+    if (!huddleParticipant) {
+      return null;
+    }
+
+    const huddle = await ctx.db.get(huddleParticipant.huddleId);
+
+    if (!huddle) {
+      return null;
+    }
+
+    // Only return DM huddles that are in "attempted" status (not started yet)
+    // and belong to the correct workspace
+    // Skip channel huddles - no notifications for channel huddles
+    if (
+      huddle.status !== "attempted" ||
+      huddle.workspaceId !== args.workspaceId ||
+      huddle.sourceType !== "dm"
+    ) {
+      return null;
+    }
+
+    const participants = await getActiveParticipants(ctx, huddle._id);
+
+    // For DM huddles, find the other member ID (the caller)
+    let otherMemberId: Id<"members"> | undefined;
+    if (huddle.sourceType === "dm" && huddle.conversationId) {
+      const conversation = await ctx.db.get(huddle.conversationId);
+      if (conversation) {
+        // Find the other member in the conversation
+        otherMemberId =
+          conversation.memberOneId === memberId
+            ? conversation.memberTwoId
+            : conversation.memberOneId;
+      }
+    }
+
+    return {
+      ...huddle,
+      participants,
+      otherMemberId, // For DM huddles, this is the other member (caller)
+    };
+  },
+});
+
+export const joinHuddleByHuddleId = mutation({
+  args: {
+    huddleId: v.id("huddles"),
+    workspaceId: v.id("workspaces"),
+  },
+  handler: async (ctx, args) => {
+    const memberId = await getCurrentMember(ctx, args.workspaceId);
+
+    if (!memberId) {
+      throw new Error("Unauthorized");
+    }
+
+    const huddle = await ctx.db.get(args.huddleId);
+
+    if (!huddle) {
+      throw new Error("Huddle not found");
+    }
+
+    if (huddle.workspaceId !== args.workspaceId) {
+      throw new Error("Huddle not in workspace");
+    }
+
+    const huddleParticipant = await ctx.db
+      .query("huddleParticipants")
+      .withIndex("by_huddle_id_member_id", (q) =>
+        q.eq("huddleId", args.huddleId).eq("memberId", memberId)
+      )
+      .unique();
+
+    if (!huddleParticipant) {
+      throw new Error("Not a participant in this huddle");
+    }
+
+    await ctx.db.patch(huddleParticipant._id, {
+      leftAt: undefined,
+      joinedAt: Date.now(),
+      status: "joined",
+      isActive: true,
+    });
+
+    return args.huddleId;
   },
 });

@@ -1,32 +1,29 @@
 "use client";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Phone } from "lucide-react";
-import { useHuddleState } from "../store/use-huddle-state";
 import { useGetMember } from "@/features/members/api/use-get-member";
 import { getUserDisplayName } from "@/lib/user-utils";
-import { Id } from "../../../../convex/_generated/dataModel";
-import { useStartOrJoinHuddle } from "../api/use-start-or-join-huddle";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { playHuddleSound, stopHuddleSound } from "@/lib/huddle-sounds";
 import { useEffect } from "react";
+import { useDeclineHuddle } from "../api/use-decline-huddle";
+import { useGetIncomingHuddle } from "../api/use-get-incoming-huddle";
+import { useCurrentMember } from "@/features/members/api/use-current-member";
+import { useJoinHuddle } from "../api/use-join-huddle";
 
 /**
  * IncomingHuddleNotification Component
- * 
+ *
  * Shows notification when someone starts a huddle
- * 
+ *
  * PHASE 1: UI-only implementation
  * - Mock incoming huddle notifications
  * - Shows caller information
  * - Provides Join/Decline options
- * 
+ *
  * TODO (PHASE 2+):
  * - Connect to Convex for real-time huddle invitations
  * - Show actual caller information
@@ -35,25 +32,20 @@ import { useEffect } from "react";
  */
 
 export function IncomingHuddleNotification() {
-  const [huddleState, setHuddleState] = useHuddleState();
   const workspaceId = useWorkspaceId();
-  const { mutate: startOrJoinHuddle } = useStartOrJoinHuddle();
-
-  // Get caller information from incoming huddle state
-  const incomingHuddle = huddleState.incomingHuddle;
-  const { data: caller } = useGetMember({
-    id: incomingHuddle?.callerId || ("" as Id<"members">),
+  const { data: incomingHuddle } = useGetIncomingHuddle({
+    workspaceId,
   });
+  const { data: currentMember } = useCurrentMember({
+    workspaceId: workspaceId,
+  });
+  const { mutate: joinHuddle } = useJoinHuddle();
+  const { mutate: declineHuddle } = useDeclineHuddle();
 
-  const displayName = caller
-    ? getUserDisplayName(caller.user)
-    : incomingHuddle?.callerName || "Someone";
-  const displayImage = caller?.user.image || incomingHuddle?.callerImage;
-  const avatarFallback = displayName.charAt(0).toUpperCase();
-
+  console.log("incomingHuddle", incomingHuddle);
   // Show notification if we have incoming huddle data
   // TODO (PHASE 2): Get this from Convex real-time updates
-  const showNotification = !!huddleState.incomingHuddle;
+  const showNotification = Boolean(incomingHuddle);
 
   // Stop incoming call sound when notification is cleared
   useEffect(() => {
@@ -63,39 +55,22 @@ export function IncomingHuddleNotification() {
   }, [showNotification]);
 
   const handleJoin = () => {
-    if (!huddleState.incomingHuddle || !workspaceId) return;
-    
-    const incomingHuddle = huddleState.incomingHuddle;
-    
+    if (!incomingHuddle || !workspaceId) return;
+
     // Stop incoming call sound
     stopHuddleSound("incoming_call");
-    
-    // Clear notification first
-    setHuddleState((prev) => ({
-      ...prev,
-      incomingHuddle: null,
-    }));
-    
+
     // Immediately join the huddle
-    startOrJoinHuddle(
+    joinHuddle(
       {
         workspaceId,
-        sourceType: incomingHuddle.huddleSource,
-        sourceId: incomingHuddle.huddleSourceId,
+        huddleId: incomingHuddle._id,
       },
       {
         onSuccess: (huddleId) => {
           console.log("Joined huddle from notification:", huddleId);
           // Play join sound
           playHuddleSound("join");
-          setHuddleState((prev) => ({
-            ...prev,
-            currentHuddleId: huddleId,
-            isHuddleActive: true,
-            isHuddleOpen: true,
-            huddleSource: incomingHuddle.huddleSource,
-            huddleSourceId: incomingHuddle.huddleSourceId,
-          }));
         },
         onError: (error) => {
           console.error("Failed to join huddle from notification:", error);
@@ -105,31 +80,52 @@ export function IncomingHuddleNotification() {
   };
 
   const handleDecline = () => {
+    if (!incomingHuddle || !workspaceId) return;
+
     // Stop incoming call sound
     stopHuddleSound("incoming_call");
-    
-    // TODO (PHASE 2): Decline huddle invitation
-    // Clear the incoming notification
-    setHuddleState((prev) => ({
-      ...prev,
-      incomingHuddle: null,
-    }));
+
+    // Decline the huddle if we have the huddleId
+    if (incomingHuddle?._id) {
+      declineHuddle(
+        { huddleId: incomingHuddle._id },
+        {
+          onSuccess: () => {
+            console.log("Huddle declined, will be deleted after 20 seconds");
+          },
+          onError: (error) => {
+            console.error("Failed to decline huddle:", error);
+          },
+        }
+      );
+    }
   };
+
+  const { data: caller } = useGetMember({
+    id: incomingHuddle?.createdBy ?? undefined,
+  });
+
+  if (incomingHuddle?.createdBy === currentMember?._id) return null;
+
+  if (!incomingHuddle || !caller) return null;
 
   if (!showNotification) {
     return null;
   }
 
   return (
-    <Dialog open={showNotification} onOpenChange={(open) => {
-      // Prevent closing by clicking outside - only allow explicit close via buttons
-      if (!open) {
-        // Only close if explicitly handled by buttons (handleClose/handleDecline)
-        // This prevents accidental dismissal
-        return;
-      }
-    }}>
-      <DialogContent 
+    <Dialog
+      open={showNotification}
+      onOpenChange={(open) => {
+        // Prevent closing by clicking outside - only allow explicit close via buttons
+        if (!open) {
+          // Only close if explicitly handled by buttons (handleClose/handleDecline)
+          // This prevents accidental dismissal
+          return;
+        }
+      }}
+    >
+      <DialogContent
         className="max-w-sm p-0 overflow-hidden bg-gray-900 border-gray-700"
         showCloseButton={false}
         onInteractOutside={(e) => {
@@ -143,7 +139,7 @@ export function IncomingHuddleNotification() {
         }}
       >
         <DialogTitle className="sr-only">
-          Incoming SyncUp from {displayName}
+          Incoming SyncUp from {getUserDisplayName(caller.user ?? {})}
         </DialogTitle>
 
         {/* Header */}
@@ -157,12 +153,16 @@ export function IncomingHuddleNotification() {
         {/* Caller Information */}
         <div className="px-6 py-8 flex flex-col items-center">
           <Avatar className="size-24 border-4 border-blue-500 mb-4">
-            <AvatarImage src={displayImage} />
+            <AvatarImage src={caller?.user.image ?? undefined} />
             <AvatarFallback className="text-3xl font-bold bg-blue-500 text-white">
-              {avatarFallback}
+              {getUserDisplayName(caller?.user ?? {})
+                .charAt(0)
+                .toUpperCase()}
             </AvatarFallback>
           </Avatar>
-          <h3 className="text-2xl font-bold text-white mb-1">{displayName}</h3>
+          <h3 className="text-2xl font-bold text-white mb-1">
+            {getUserDisplayName(caller?.user ?? {})}
+          </h3>
           <p className="text-sm text-gray-400">is calling you</p>
         </div>
 

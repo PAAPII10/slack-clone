@@ -21,11 +21,11 @@ import { useRouter } from "next/navigation";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { useCurrentMember } from "@/features/members/api/use-current-member";
 import { ChannelMembers } from "./ChannelMembers";
-import { useHuddleState } from "@/features/huddle/store/use-huddle-state";
-import { useStartOrJoinHuddle } from "@/features/huddle/api/use-start-or-join-huddle";
 import { playHuddleSound } from "@/lib/huddle-sounds";
 import { Hint } from "@/components/Hint";
 import { useHuddleAudioSettings } from "@/features/huddle/hooks/use-huddle-audio-settings";
+import { usePanel } from "@/hooks/use-panel";
+import { useStartHuddle } from "@/features/huddle/api/use-start-huddle";
 
 interface ChannelHeaderProps {
   title: string;
@@ -36,6 +36,7 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
   const router = useRouter();
   const channelId = useChannelId();
   const workspaceId = useWorkspaceId();
+  const { onOpenHuddle } = usePanel();
   const [isEditing, setIsEditing] = useState(false);
   const [value, setValue] = useState(title);
   const [channelType, setChannelType] = useState<"public" | "private">(type);
@@ -47,8 +48,7 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
   });
 
   const { data: member } = useCurrentMember({ workspaceId });
-  const [, setHuddleState] = useHuddleState();
-  const { mutate: startOrJoinHuddle } = useStartOrJoinHuddle();
+  const { mutate: startHuddle } = useStartHuddle();
   const { settings } = useHuddleAudioSettings();
 
   const { mutate: updateChannel, isPending: isUpdatingChannel } =
@@ -105,9 +105,9 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
 
   const handleStartHuddle = () => {
     if (!channelId || !workspaceId) return;
-    
+
     // Immediately start/join huddle - no join screen
-    startOrJoinHuddle(
+    startHuddle(
       {
         workspaceId,
         sourceType: "channel",
@@ -116,17 +116,8 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
       },
       {
         onSuccess: (huddleId) => {
-          console.log("Huddle started/joined successfully:", huddleId);
-          // Play join sound
+          onOpenHuddle(huddleId);
           playHuddleSound("join");
-          setHuddleState((prev) => ({
-            ...prev,
-            currentHuddleId: huddleId,
-            isHuddleActive: true,
-            isHuddleOpen: true,
-            huddleSource: "channel",
-            huddleSourceId: channelId,
-          }));
         },
         onError: (error) => {
           console.error("Failed to start huddle:", error);

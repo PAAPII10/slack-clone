@@ -50,7 +50,7 @@ export async function extractPlainTextFromQuill(
 }
 
 export function isValidConvexId(value: unknown): value is string {
-  if (typeof value !== "string") return false;
+  if (!value || typeof value !== "string") return false;
 
   // Convex Ids are base64url, usually 17–32 chars
   const CONVEX_ID_REGEX = /^[a-zA-Z0-9_-]{17,32}$/;

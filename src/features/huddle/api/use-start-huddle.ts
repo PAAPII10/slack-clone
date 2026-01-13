@@ -4,37 +4,34 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { useState, useCallback, useMemo } from "react";
 import { HuddleSource } from "../store/use-huddle-state";
 
-interface UseStartOrJoinHuddleOptions {
+interface UseStartHuddleOptions {
   onSuccess?: (huddleId: Id<"huddles">) => void;
   onError?: (error: Error) => void;
   throwError?: boolean;
 }
 
-interface UseStartOrJoinHuddleProps {
+interface UseStartHuddleProps {
   workspaceId: Id<"workspaces">;
   sourceType: HuddleSource;
   sourceId: Id<"channels"> | Id<"conversations"> | Id<"members">;
   startMuted?: boolean;
 }
 
-export function useStartOrJoinHuddle() {
+export function useStartHuddle() {
   const [data, setData] = useState<Id<"huddles"> | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [status, setStatus] = useState<
     "success" | "error" | "pending" | "settled" | null
   >(null);
 
-  const mutation = useMutation(api.huddles.startOrJoinHuddle);
+  const mutation = useMutation(api.huddles.startHuddle);
   const isPending = useMemo(() => status === "pending", [status]);
   const isSuccess = useMemo(() => status === "success", [status]);
   const isError = useMemo(() => status === "error", [status]);
   const isSettled = useMemo(() => status === "settled", [status]);
 
   const mutate = useCallback(
-    async (
-      values: UseStartOrJoinHuddleProps,
-      options?: UseStartOrJoinHuddleOptions
-    ) => {
+    async (values: UseStartHuddleProps, options?: UseStartHuddleOptions) => {
       try {
         setData(null);
         setError(null);

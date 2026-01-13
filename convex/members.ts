@@ -180,6 +180,7 @@ export const getById = query({
         fullName: user.fullName,
         title: userProfile?.title,
         pronunciation: userProfile?.pronunciation,
+        image: user.image,
       },
     };
   },

@@ -74,7 +74,8 @@ export function useWebRTC({
         console.log(`Creating peer for ${peerMemberId} with local stream:`, {
           audioTracks: localStream.getAudioTracks().length,
           videoTracks: localStream.getVideoTracks().length,
-          audioEnabled: localStream.getAudioTracks().filter(t => t.enabled).length,
+          audioEnabled: localStream.getAudioTracks().filter((t) => t.enabled)
+            .length,
         });
       }
 
@@ -116,11 +117,15 @@ export function useWebRTC({
 
       peer.on("error", (err) => {
         console.error(`Peer error with ${peerMemberId}:`, err);
-        
+
         // Handle abrupt disconnections (e.g., page reload, browser close)
-        if (err.message?.includes("User-Initiated Abort") || 
-            err.message?.includes("Close called")) {
-          console.log(`Peer ${peerMemberId} disconnected abruptly, cleaning up`);
+        if (
+          err.message?.includes("User-Initiated Abort") ||
+          err.message?.includes("Close called")
+        ) {
+          console.log(
+            `Peer ${peerMemberId} disconnected abruptly, cleaning up`
+          );
           // Don't log as error - this is expected behavior
           peersRef.current.delete(peerMemberId);
           setRemoteStreams((prev) => {
@@ -161,34 +166,46 @@ export function useWebRTC({
       const peerWithPc = peerConnection.peer as PeerWithPc;
       if (!peerWithPc._pc) {
         // Peer has no RTCPeerConnection, it's likely destroyed
-        console.log(`Peer ${fromMemberId} has no RTCPeerConnection, ignoring signal`);
+        console.log(
+          `Peer ${fromMemberId} has no RTCPeerConnection, ignoring signal`
+        );
         return;
       }
 
       const pc = peerWithPc._pc;
       // Check connection state - skip if disconnected, failed, or closed
-      if (pc.connectionState === "disconnected" || pc.connectionState === "failed" || pc.connectionState === "closed") {
-        console.log(`Peer ${fromMemberId} connection is ${pc.connectionState}, ignoring signal`);
+      if (
+        pc.connectionState === "disconnected" ||
+        pc.connectionState === "failed" ||
+        pc.connectionState === "closed"
+      ) {
+        console.log(
+          `Peer ${fromMemberId} connection is ${pc.connectionState}, ignoring signal`
+        );
         return;
       }
 
       // Check signaling state to avoid applying signals in wrong state
       const signalingState = pc.signalingState;
-      
+
       // Detect signal type
       const isOffer = signal.type === "offer";
       const isAnswer = signal.type === "answer";
-      
+
       // Validate signal against current state
       if (isAnswer && signalingState !== "have-local-offer") {
         // Received answer but not waiting for one - likely stale signal
-        console.log(`Ignoring answer from ${fromMemberId}: signaling state is ${signalingState}, expected have-local-offer`);
+        console.log(
+          `Ignoring answer from ${fromMemberId}: signaling state is ${signalingState}, expected have-local-offer`
+        );
         return;
       }
-      
+
       if (isOffer && signalingState !== "stable") {
         // Received offer but not in stable state - connection might be negotiating
-        console.log(`Ignoring offer from ${fromMemberId}: signaling state is ${signalingState}, expected stable`);
+        console.log(
+          `Ignoring offer from ${fromMemberId}: signaling state is ${signalingState}, expected stable`
+        );
         return;
       }
 
@@ -256,7 +273,15 @@ export function useWebRTC({
         setPeerCount(peersRef.current.size);
       }
     });
-  }, [enabled, huddleId, currentMember, participants, isInitiator, createPeer, localStream]);
+  }, [
+    enabled,
+    huddleId,
+    currentMember,
+    participants,
+    isInitiator,
+    createPeer,
+    localStream,
+  ]);
 
   // Apply incoming signals
   useEffect(() => {

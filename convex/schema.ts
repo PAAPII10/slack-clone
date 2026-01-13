@@ -135,10 +135,16 @@ const schema = defineSchema({
     channelId: v.optional(v.id("channels")), // For channel huddles
     conversationId: v.optional(v.id("conversations")), // For DM huddles
     createdBy: v.id("members"),
-    isActive: v.boolean(),
     createdAt: v.number(),
     startedAt: v.number(), // When huddle actually started (when first participant joined)
+    isActive: v.boolean(), // True when huddle is active (when status is started)
     endedAt: v.optional(v.number()), // When huddle ended (when isActive became false)
+    status: v.union(
+      v.literal("attempted"),
+      v.literal("started"),
+      v.literal("ended"),
+      v.literal("declined")
+    ), // True when huddle has no participants (everyone hung up)
   })
     .index("by_workspace_id", ["workspaceId"])
     .index("by_channel_id", ["channelId"])
@@ -146,9 +152,15 @@ const schema = defineSchema({
   huddleParticipants: defineTable({
     huddleId: v.id("huddles"),
     memberId: v.id("members"),
-    joinedAt: v.number(),
+    joinedAt: v.optional(v.number()),
     leftAt: v.optional(v.number()),
+    isActive: v.boolean(), // True when participant is active (when leftAt is undefined)
     role: v.union(v.literal("host"), v.literal("participant")),
+    status: v.union(
+      v.literal("waiting"),
+      v.literal("joined"),
+      v.literal("left")
+    ),
     isMuted: v.optional(v.boolean()), // Track whether participant is muted
   })
     .index("by_huddle_id", ["huddleId"])
