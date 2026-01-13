@@ -353,7 +353,6 @@ export const get = query({
             }
 
             // Get display name (displayName || fullName || name)
-            const displayName = user.displayName || user.fullName || user.name;
 
             const reactions = await populateReactions(ctx, message._id);
 
@@ -407,8 +406,41 @@ export const get = query({
               })[]
             );
 
-            const reactionWithoutMemberIdProperty = dedupedReactions.map(
-              ({ memberId, ...rest }) => rest
+            // Populate member names for each reaction
+            const reactionsWithNames = await Promise.all(
+              dedupedReactions.map(async (reaction) => {
+                const memberNames = await Promise.all(
+                  reaction.memberIds.map(async (memberId) => {
+                    const reactionMember = await populateMember(ctx, memberId);
+                    if (!reactionMember) return null;
+                    const reactionUser = await populateUser(
+                      ctx,
+                      reactionMember.userId
+                    );
+                    if (!reactionUser) return null;
+                    return (
+                      reactionUser.displayName ||
+                      reactionUser.fullName ||
+                      reactionUser.name ||
+                      null
+                    );
+                  })
+                );
+                return {
+                  ...reaction,
+                  memberNames: memberNames.filter(
+                    (name): name is string => name !== null
+                  ),
+                };
+              })
+            );
+
+            const reactionWithoutMemberIdProperty = reactionsWithNames.map(
+              (reaction) => {
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                const { memberId, ...rest } = reaction;
+                return rest;
+              }
             );
 
             // Get display name (displayName || fullName || name)
@@ -564,8 +596,38 @@ export const messageById = query({
       })[]
     );
 
-    const reactionWithoutMemberIdProperty = dedupedReactions.map(
-      ({ memberId, ...rest }) => rest
+    // Populate member names for each reaction
+    const reactionsWithNames = await Promise.all(
+      dedupedReactions.map(async (reaction) => {
+        const memberNames = await Promise.all(
+          reaction.memberIds.map(async (memberId) => {
+            const reactionMember = await populateMember(ctx, memberId);
+            if (!reactionMember) return null;
+            const reactionUser = await populateUser(ctx, reactionMember.userId);
+            if (!reactionUser) return null;
+            return (
+              reactionUser.displayName ||
+              reactionUser.fullName ||
+              reactionUser.name ||
+              null
+            );
+          })
+        );
+        return {
+          ...reaction,
+          memberNames: memberNames.filter(
+            (name): name is string => name !== null
+          ),
+        };
+      })
+    );
+
+    const reactionWithoutMemberIdProperty = reactionsWithNames.map(
+      (reaction) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { memberId, ...rest } = reaction;
+        return rest;
+      }
     );
 
     // Get attachment URLs and metadata

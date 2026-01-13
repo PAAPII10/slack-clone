@@ -212,7 +212,9 @@ export function Profile({ memberId, onClose }: ProfileProps) {
                   <p className="text-[13px] font-semibold text-muted-foreground">
                     Full name
                   </p>
-                  <p className="text-sm text-foreground">{member.user.fullName}</p>
+                  <p className="text-sm text-foreground">
+                    {member.user.fullName}
+                  </p>
                 </div>
               )}
 
@@ -230,7 +232,9 @@ export function Profile({ memberId, onClose }: ProfileProps) {
                   <p className="text-[13px] font-semibold text-muted-foreground">
                     Name pronunciation
                   </p>
-                  <p className="text-sm text-foreground">{member.user.pronunciation}</p>
+                  <p className="text-sm text-foreground">
+                    {member.user.pronunciation}
+                  </p>
                 </div>
               )}
             </div>
