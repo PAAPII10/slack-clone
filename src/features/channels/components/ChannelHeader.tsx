@@ -24,8 +24,11 @@ import { ChannelMembers } from "./ChannelMembers";
 import { playHuddleSound } from "@/lib/huddle-sounds";
 import { Hint } from "@/components/Hint";
 import { useHuddleAudioSettings } from "@/features/huddle/hooks/use-huddle-audio-settings";
-import { usePanel } from "@/hooks/use-panel";
 import { useStartHuddle } from "@/features/huddle/api/use-start-huddle";
+import { useGetChannelHuddle } from "@/features/huddle/api/use-get-channel-huddle";
+import { ChannelHuddleDialog } from "@/features/huddle/components/ChannelHuddleDialog";
+import { useHuddleParticipants } from "@/features/huddle/api/use-huddle-participants";
+import { useCloseChannelHuddleWhenNoParticipants } from "@/features/huddle/api/close-channel-huddle-when-no-participant";
 
 interface ChannelHeaderProps {
   title: string;
@@ -36,7 +39,6 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
   const router = useRouter();
   const channelId = useChannelId();
   const workspaceId = useWorkspaceId();
-  const { onOpenHuddle } = usePanel();
   const [isEditing, setIsEditing] = useState(false);
   const [value, setValue] = useState(title);
   const [channelType, setChannelType] = useState<"public" | "private">(type);
@@ -50,11 +52,21 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
   const { data: member } = useCurrentMember({ workspaceId });
   const { mutate: startHuddle } = useStartHuddle();
   const { settings } = useHuddleAudioSettings();
+  const { data: channelHuddle, hasActiveHuddle } = useGetChannelHuddle({
+    channelId,
+  });
+  const [isHuddleDialogOpen, setIsHuddleDialogOpen] = useState(false);
 
   const { mutate: updateChannel, isPending: isUpdatingChannel } =
     useUpdateChannel();
   const { mutate: removeChannel, isPending: isRemovingChannel } =
     useRemoveChannel();
+  const { mutate: closeChannelHuddleMutation } =
+    useCloseChannelHuddleWhenNoParticipants();
+
+  const { data: participants } = useHuddleParticipants({
+    huddleId: channelHuddle?.huddleId,
+  });
 
   const handleEditOpen = (val: boolean) => {
     if (member?.role !== "admin") return;
@@ -115,15 +127,37 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
         startMuted: settings.startMuted,
       },
       {
-        onSuccess: (huddleId) => {
-          onOpenHuddle(huddleId);
+        onSuccess: () => {
           playHuddleSound("join");
+          setIsHuddleDialogOpen(true);
         },
         onError: (error) => {
           console.error("Failed to start huddle:", error);
         },
       }
     );
+  };
+
+  const handleJoinHuddle = () => {
+    if (!channelHuddle?.huddleId) return;
+    setIsHuddleDialogOpen(true);
+  };
+
+  const handleCloseHuddleDialog = (val: boolean) => {
+    setIsHuddleDialogOpen(val);
+    if (participants?.length === 0 && channelHuddle?.huddleId && channelId) {
+      closeChannelHuddleMutation(
+        { channelId },
+        {
+          onSuccess: () => {
+            playHuddleSound("hangup");
+          },
+          onError: () => {
+            toast.error("Failed to close channel huddle");
+          },
+        }
+      );
+    }
   };
 
   return (
@@ -258,18 +292,46 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
         </Dialog>
       </div>
       <div className="flex items-center gap-1">
-        <Hint label="Start Huddle">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-sm"
-            onClick={handleStartHuddle}
+        {hasActiveHuddle && channelHuddle ? (
+          <Hint
+            label={`Join Huddle (${channelHuddle.participantCount} member${
+              channelHuddle.participantCount !== 1 ? "s" : ""
+            })`}
           >
-            <Phone className="size-4" />
-          </Button>
-        </Hint>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-sm"
+              onClick={handleJoinHuddle}
+            >
+              <Phone className="size-4 mr-1" />
+              <span className="text-xs">
+                Join ({channelHuddle.participantCount})
+              </span>
+            </Button>
+          </Hint>
+        ) : (
+          <Hint label="Start Huddle">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-sm"
+              onClick={handleStartHuddle}
+            >
+              <Phone className="size-4" />
+            </Button>
+          </Hint>
+        )}
         <ChannelMembers channelType={channelType} />
       </div>
+      {hasActiveHuddle && channelHuddle && (
+        <ChannelHuddleDialog
+          open={isHuddleDialogOpen}
+          onOpenChange={handleCloseHuddleDialog}
+          huddleId={channelHuddle.huddleId}
+          channelId={channelId}
+        />
+      )}
     </div>
   );
 }

@@ -166,16 +166,7 @@ const schema = defineSchema({
     .index("by_huddle_id", ["huddleId"])
     .index("by_member_id", ["memberId"])
     .index("by_huddle_id_member_id", ["huddleId", "memberId"]),
-  huddleSignals: defineTable({
-    huddleId: v.id("huddles"),
-    fromMemberId: v.id("members"),
-    toMemberId: v.id("members"),
-    signal: v.any(), // WebRTC signal object (offer, answer, or ICE candidate)
-    createdAt: v.number(),
-  })
-    .index("by_huddle_id", ["huddleId"])
-    .index("by_to_member_id", ["toMemberId"])
-    .index("by_huddle_id_to_member_id", ["huddleId", "toMemberId"]),
+  // huddleSignals table removed - WebRTC signaling removed, will use LiveKit in Phase 2
 });
 
 export default schema;

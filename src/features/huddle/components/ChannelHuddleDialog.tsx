@@ -27,36 +27,183 @@ import {
   Loader2,
 } from "lucide-react";
 import { Id } from "../../../../convex/_generated/dataModel";
-import type { HuddleSharedData } from "./HuddleBar";
-import { useJoinHuddle } from "../api/use-join-huddle";
+import { useJoinChannelHuddle } from "../api/use-join-channel-huddle";
+import { useHuddleParticipants } from "../api/use-huddle-participants";
+import { useGetChannel } from "@/features/channels/api/use-get-channel";
+import { useCurrentMember } from "@/features/members/api/use-current-member";
+import { useWorkspaceId } from "@/hooks/use-workspace-id";
+import { getUserDisplayName } from "@/lib/user-utils";
+import { HuddleMediaProvider } from "./HuddleMediaProvider";
 
-interface HuddleDialogProps {
+interface ChannelHuddleDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  sharedData: HuddleSharedData;
+  huddleId: Id<"huddles"> | null;
+  channelId: Id<"channels"> | null;
 }
 
-// Inner component that uses WebRTC hooks
-function HuddleDialogContent({
+// Join screen component (doesn't need media)
+function ChannelHuddleJoinScreen({
   open,
   onOpenChange,
-  sharedData,
-}: HuddleDialogProps) {
-  const {
-    workspaceId,
-    currentMember,
-    effectiveHuddleId,
-    isHuddleActive,
-    huddleTitle,
-    displayParticipants,
-    activeHuddle,
-  } = sharedData;
+  huddleId,
+  channelId,
+  onJoinSuccess,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  huddleId: Id<"huddles"> | null;
+  channelId: Id<"channels"> | null;
+  onJoinSuccess: () => void;
+}) {
+  const workspaceId = useWorkspaceId();
+  const { data: currentMember } = useCurrentMember({ workspaceId });
+  const { data: channel } = useGetChannel({
+    id: channelId || ("" as Id<"channels">),
+  });
+  const { data: participants, isLoading: isLoadingParticipants } =
+    useHuddleParticipants({ huddleId });
+  const { settings } = useHuddleAudioSettings();
+  const { mutate: joinHuddle, isPending: isJoiningHuddle } =
+    useJoinChannelHuddle();
+
+  const huddleTitle = channel ? `# ${channel.name}` : "Channel Huddle";
+
+  const displayParticipants =
+    participants
+      ?.filter((p) => p.user && p.memberId)
+      .map((p) => ({
+        id: p.memberId,
+        name: getUserDisplayName(p.user),
+        image: p.user.image || undefined,
+        isYou: p.memberId === currentMember?._id,
+        role: p.role,
+        isMuted: p.isMuted ?? false,
+        status: "joined" as const,
+      })) || [];
+
+  const handleJoin = () => {
+    if (!huddleId) return;
+
+    joinHuddle(
+      {
+        huddleId,
+        startMuted: settings.startMuted,
+      },
+      {
+        onSuccess: () => {
+          playHuddleSound("join");
+          onJoinSuccess();
+        },
+        onError: (error) => {
+          console.error("Failed to join huddle:", error);
+        },
+      }
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="max-w-md p-0 overflow-hidden"
+        showCloseButton={false}
+        onInteractOutside={(e) => {
+          e.preventDefault();
+        }}
+      >
+        <DialogTitle className="sr-only">Huddle in {huddleTitle}</DialogTitle>
+        <div className="flex flex-col">
+          {/* Join Header */}
+          <div className="bg-[#5E2C5F] px-6 py-4 flex items-center justify-between gap-3 rounded-t-lg">
+            <div className="flex items-center gap-3">
+              <Headphones className="size-6 text-white" />
+              <h2 className="text-lg font-semibold text-white tracking-tight">
+                Huddle in {huddleTitle}
+              </h2>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onOpenChange(false)}
+              className="text-white hover:bg-white/20 hover:text-white h-8 w-8 rounded-full"
+            >
+              <X className="size-5" />
+            </Button>
+          </div>
+
+          {/* Participant Preview */}
+          <div className="px-6 py-12 bg-linear-to-br from-purple-50 via-pink-50 to-blue-50 min-h-[320px] flex items-center justify-center">
+            {isLoadingParticipants ? (
+              <Loader2 className="size-8 text-gray-500 animate-spin" />
+            ) : displayParticipants.length > 0 ? (
+              <div className="flex items-center gap-8">
+                {displayParticipants.map((participant) => {
+                  return (
+                    <div
+                      key={participant.id}
+                      className="flex flex-col items-center group"
+                    >
+                      <div className="relative">
+                        <Avatar className="size-24 border-4 border-white shadow-xl transition-transform group-hover:scale-105">
+                          <AvatarImage src={participant.image || undefined} />
+                          <AvatarFallback className="text-3xl font-bold bg-[#5E2C5F] text-white">
+                            {participant.name.charAt(0).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                      </div>
+                      <span className="mt-4 text-base font-semibold tracking-tight text-gray-800">
+                        {participant.name.split(" ")[0]}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-gray-500">No participants yet</div>
+            )}
+          </div>
+
+          {/* Join Button */}
+          <div className="px-6 py-5 bg-white border-t rounded-b-lg">
+            <Button
+              onClick={handleJoin}
+              disabled={isJoiningHuddle}
+              className="w-full bg-[#5E2C5F] hover:bg-[#481349] text-white font-semibold py-6 text-base shadow-md hover:shadow-lg transition-all disabled:opacity-50"
+              size="lg"
+            >
+              <Headphones className="size-5 mr-2" />
+              {isJoiningHuddle ? "Joining..." : "Join Huddle"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Active huddle view component (needs media)
+function ChannelHuddleActiveView({
+  open,
+  onOpenChange,
+  huddleId,
+  channelId,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  huddleId: Id<"huddles"> | null;
+  channelId: Id<"channels"> | null;
+}) {
+  const workspaceId = useWorkspaceId();
+  const { data: currentMember } = useCurrentMember({ workspaceId });
+  const { data: channel } = useGetChannel({
+    id: channelId || ("" as Id<"channels">),
+  });
+  const { data: participants } = useHuddleParticipants({ huddleId });
 
   const [isMaximized, setIsMaximized] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [, , openSettings] = useSettingsModal();
   const { settings } = useHuddleAudioSettings();
-  const { mutate: joinHuddle, isPending: isJoiningHuddle } = useJoinHuddle();
   const { mutate: leaveHuddle } = useLeaveHuddle();
 
   // Media controls from HuddleMediaProvider
@@ -76,10 +223,25 @@ function HuddleDialogContent({
     isConnecting,
   } = useHuddleMedia();
 
+  // Build display participants
+  const displayParticipants =
+    participants
+      ?.filter((p) => p.user && p.memberId)
+      .map((p) => ({
+        id: p.memberId,
+        name: getUserDisplayName(p.user),
+        image: p.user.image || undefined,
+        isYou: p.memberId === currentMember?._id,
+        role: p.role,
+        isMuted: p.isMuted ?? false,
+        status: "joined" as const,
+      })) || [];
+
+  const huddleTitle = channel ? `# ${channel.name}` : "Channel Huddle";
+
   // Auto-maximize when screen sharing starts
   const prevScreenSharingRef = useRef(isScreenSharing);
   useEffect(() => {
-    // Only maximize when screen sharing starts (transitions from false to true)
     if (isScreenSharing && !prevScreenSharingRef.current && !isMaximized) {
       setTimeout(() => {
         setIsMaximized(true);
@@ -92,7 +254,6 @@ function HuddleDialogContent({
   const handleToggleFullscreen = useCallback(() => {
     if (isScreenSharing && screenShareVideoRef.current) {
       if (!isFullscreen) {
-        // Enter fullscreen
         if (screenShareVideoRef.current.requestFullscreen) {
           screenShareVideoRef.current.requestFullscreen();
         } else if (
@@ -106,7 +267,6 @@ function HuddleDialogContent({
         }
         setIsFullscreen(true);
       } else {
-        // Exit fullscreen
         if (document.exitFullscreen) {
           document.exitFullscreen();
         } else if ((document as any).webkitExitFullscreen) {
@@ -180,21 +340,16 @@ function HuddleDialogContent({
     new Map()
   );
   const playingRefs = useRef<Map<Id<"members">, boolean>>(new Map());
-
-  // Screen share video ref
   const screenShareVideoRef = useRef<HTMLVideoElement>(null);
 
   // Active speaker detection
+  // In active view, user is always a participant
   const activeSpeakerId = useActiveSpeaker({
-    isHuddleActive,
+    isHuddleActive: true,
     localStream,
     remoteStreams,
     currentMemberId: currentMember?._id || null,
   });
-
-  // Determine dialog huddle title (with # prefix for channels)
-  const dialogHuddleTitle =
-    activeHuddle?.sourceType === "channel" ? `# ${huddleTitle}` : huddleTitle;
 
   // Update local video element
   useEffect(() => {
@@ -209,14 +364,12 @@ function HuddleDialogContent({
     if (!videoElement) return;
 
     if (screenSharingMemberId) {
-      // Get screen share stream (local or remote)
       const shareStream =
         screenSharingMemberId === currentMember?._id
           ? screenStream
           : remoteScreenShares.get(screenSharingMemberId);
 
       if (shareStream && videoElement.srcObject !== shareStream) {
-        // Use requestAnimationFrame to avoid React's strict mode warning
         requestAnimationFrame(() => {
           if (screenShareVideoRef.current) {
             screenShareVideoRef.current.srcObject = shareStream;
@@ -224,7 +377,6 @@ function HuddleDialogContent({
         });
       }
     } else {
-      // Clear screen share when no one is sharing
       requestAnimationFrame(() => {
         if (screenShareVideoRef.current) {
           screenShareVideoRef.current.srcObject = null;
@@ -245,7 +397,6 @@ function HuddleDialogContent({
       const audioElement = remoteAudioRefs.current.get(memberId);
       const isPlaying = playingRefs.current.get(memberId);
 
-      // Ensure audio tracks are enabled
       const audioTracks = stream.getAudioTracks();
       audioTracks.forEach((track: MediaStreamTrack) => {
         if (!track.enabled) {
@@ -254,16 +405,13 @@ function HuddleDialogContent({
       });
 
       if (videoElement) {
-        // Only update srcObject if it's different to avoid interrupting playback
         if (videoElement.srcObject !== stream) {
           videoElement.srcObject = stream;
         }
 
-        // Ensure video element is not muted and can play audio
         videoElement.muted = false;
         videoElement.volume = settings.outputVolume;
 
-        // Set speaker output device (sinkId) for video element
         if (settings.selectedSpeakerId && "setSinkId" in videoElement) {
           (
             videoElement as HTMLVideoElement & {
@@ -279,7 +427,6 @@ function HuddleDialogContent({
             });
         }
 
-        // Only try to play if not already playing and element is ready
         if (!isPlaying && videoElement.readyState >= 2) {
           playingRefs.current.set(memberId, true);
           videoElement
@@ -289,7 +436,6 @@ function HuddleDialogContent({
             })
             .catch((err) => {
               playingRefs.current.set(memberId, false);
-              // Only log if it's not an abort error (which is expected when stream changes)
               if (
                 !err.message.includes("interrupted") &&
                 !err.message.includes("AbortError")
@@ -303,9 +449,7 @@ function HuddleDialogContent({
         }
       }
 
-      // Handle audio-only streams with audio element
       if (audioElement && stream.getVideoTracks().length === 0) {
-        // Only update srcObject if it's different
         if (audioElement.srcObject !== stream) {
           audioElement.srcObject = stream;
         }
@@ -313,7 +457,6 @@ function HuddleDialogContent({
         audioElement.muted = false;
         audioElement.volume = settings.outputVolume;
 
-        // Set speaker output device (sinkId) for audio element
         if (settings.selectedSpeakerId && "setSinkId" in audioElement) {
           (
             audioElement as HTMLAudioElement & {
@@ -329,7 +472,6 @@ function HuddleDialogContent({
             });
         }
 
-        // Only try to play if not already playing
         if (!isPlaying && audioElement.readyState >= 2) {
           playingRefs.current.set(memberId, true);
           audioElement
@@ -350,7 +492,6 @@ function HuddleDialogContent({
       }
     });
 
-    // Clean up playing refs for removed streams
     const currentMemberIds = new Set(remoteStreams.keys());
     playingRefs.current.forEach((_, memberId) => {
       if (!currentMemberIds.has(memberId)) {
@@ -359,53 +500,20 @@ function HuddleDialogContent({
     });
   }, [remoteStreams, settings.outputVolume, settings.selectedSpeakerId]);
 
-  // Note: Auto-join logic is no longer needed here
-  // HuddleCall component manages active huddle detection via getCurrentUserHuddle
-  // If huddle exists and is active, it will be shown automatically
-
-  const handleJoin = () => {
-    if (!activeHuddle || !workspaceId) return;
-
-    const sourceId =
-      activeHuddle.sourceType === "channel"
-        ? (activeHuddle.channelId as Id<"channels">)
-        : activeHuddle.sourceType === "dm"
-        ? (sharedData.member?._id as Id<"members">)
-        : null;
-
-    if (!activeHuddle.sourceType || !sourceId) return;
-
-    joinHuddle(
-      {
-        workspaceId,
-        huddleId: activeHuddle._id,
-      },
-      {
-        onSuccess: (huddleId) => {
-          console.log("Huddle started/joined successfully:", huddleId);
-          // Play join sound
-          playHuddleSound("join");
-          // State will be updated by HuddleCall when huddle data changes
-        },
-        onError: (error) => {
-          console.error("Failed to join huddle:", error);
-        },
-      }
-    );
-  };
-
   const handleLeave = () => {
     cleanup();
-    // Play hangup sound
     playHuddleSound("hangup");
-    const huddleIdToLeave = effectiveHuddleId;
-    if (huddleIdToLeave) {
-      leaveHuddle(huddleIdToLeave, {
+    if (huddleId) {
+      leaveHuddle(huddleId, {
         onSuccess: () => {
-          // State will be updated by HuddleCall when huddle data changes
           console.log("Huddle left successfully");
+          // Close the dialog when user leaves
+          onOpenChange(false);
         },
       });
+    } else {
+      // If no huddleId, just close the dialog
+      onOpenChange(false);
     }
   };
 
@@ -422,114 +530,18 @@ function HuddleDialogContent({
   };
 
   const handleEmoji = () => {
-    // TODO (PHASE 2): Open emoji picker for reactions
+    // TODO: Open emoji picker for reactions
   };
 
   const handleSettings = () => {
     openSettings("audio-video");
   };
 
-  // Show join screen if not active
-  if (!isHuddleActive) {
-    return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent
-          className="max-w-md p-0 overflow-hidden"
-          showCloseButton={false}
-          onInteractOutside={(e) => {
-            // Prevent closing when clicking outside
-            e.preventDefault();
-          }}
-        >
-          <DialogTitle className="sr-only">
-            Huddle with {huddleTitle}
-          </DialogTitle>
-          <div className="flex flex-col">
-            {/* Join Header */}
-            <div className="bg-[#5E2C5F] px-6 py-4 flex items-center gap-3 rounded-t-lg">
-              <Headphones className="size-6 text-white" />
-              <h2 className="text-lg font-semibold text-white tracking-tight">
-                Huddle with {huddleTitle}
-              </h2>
-            </div>
-
-            {/* Participant Preview */}
-            <div className="px-6 py-12 bg-linear-to-br from-purple-50 via-pink-50 to-blue-50 min-h-[320px] flex items-center justify-center">
-              <div className="flex items-center gap-8">
-                {displayParticipants.length > 0 ? (
-                  displayParticipants.map((participant) => {
-                    const isWaiting = participant.status === "waiting";
-                    return (
-                      <div
-                        key={participant.id}
-                        className="flex flex-col items-center group"
-                      >
-                        <div className="relative">
-                          <Avatar
-                            className={`size-24 border-4 border-white shadow-xl transition-transform group-hover:scale-105 ${
-                              isWaiting ? "opacity-50" : ""
-                            }`}
-                          >
-                            <AvatarImage src={participant.image || undefined} />
-                            <AvatarFallback className="text-3xl font-bold bg-[#5E2C5F] text-white">
-                              {participant.name.charAt(0).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          {isWaiting && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-full">
-                              <Loader2 className="size-8 text-white animate-spin" />
-                            </div>
-                          )}
-                          {participant.isYou && (
-                            <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-white px-3 py-1 rounded-full shadow-md border border-gray-200">
-                              <span className="text-xs font-semibold text-gray-800">
-                                You
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        <span
-                          className={`mt-4 text-base font-semibold tracking-tight ${
-                            isWaiting ? "text-gray-500" : "text-gray-800"
-                          }`}
-                        >
-                          {participant.isYou
-                            ? "You"
-                            : participant.name.split(" ")[0]}
-                        </span>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="text-gray-500">No participants yet</div>
-                )}
-              </div>
-            </div>
-
-            {/* Join Button */}
-            <div className="px-6 py-5 bg-white border-t rounded-b-lg">
-              <Button
-                onClick={handleJoin}
-                disabled={isJoiningHuddle}
-                className="w-full bg-[#5E2C5F] hover:bg-[#481349] text-white font-semibold py-6 text-base shadow-md hover:shadow-lg transition-all disabled:opacity-50"
-                size="lg"
-              >
-                <Headphones className="size-5 mr-2" />
-                {isJoiningHuddle ? "Joining..." : "Join Huddle"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
   const handleToggleSize = () => {
     setIsMaximized(!isMaximized);
   };
 
   const handleClose = () => {
-    // Close dialog without ending the huddle
     onOpenChange(false);
   };
 
@@ -541,11 +553,10 @@ function HuddleDialogContent({
   // Active huddle view
   return (
     <>
-      {/* Fullscreen Overlay - Show when in fullscreen mode */}
+      {/* Fullscreen Overlay */}
       {isFullscreen && isScreenSharing && screenSharingMemberId && (
         <div className="fixed inset-0 z-9999 bg-black flex items-center justify-center">
           <div className="w-full h-full relative flex">
-            {/* Screen Share Video - Fullscreen */}
             <div className="flex-1 relative">
               <video
                 ref={screenShareVideoRef}
@@ -556,7 +567,6 @@ function HuddleDialogContent({
               />
             </div>
 
-            {/* Active Speaker Indicator - Right side below screen */}
             {activeSpeakerParticipant && (
               <div className="absolute bottom-8 right-8 flex items-center gap-3 bg-black/80 px-4 py-3 rounded-lg border border-white/20">
                 <Avatar className="size-10 border-2 border-[#5E2C5F]">
@@ -579,7 +589,6 @@ function HuddleDialogContent({
               </div>
             )}
 
-            {/* Escape hint */}
             <div className="absolute top-4 right-4 bg-black/70 px-3 py-2 rounded text-xs text-white">
               Press ESC to exit fullscreen
             </div>
@@ -598,21 +607,18 @@ function HuddleDialogContent({
           }}
           showCloseButton={false}
           onInteractOutside={(e) => {
-            // Prevent closing when clicking outside - only allow minimize button
             e.preventDefault();
           }}
         >
-          <DialogTitle className="sr-only">
-            Huddle with {dialogHuddleTitle}
-          </DialogTitle>
-          {/* Thin Header */}
+          <DialogTitle className="sr-only">Huddle in {huddleTitle}</DialogTitle>
+          {/* Header */}
           <div className="bg-white px-6 py-3 flex items-center justify-between shrink-0 border-b border-gray-200">
             <div className="flex items-center gap-3">
               <div className="size-8 rounded-full bg-[#5E2C5F] flex items-center justify-center">
                 <Headphones className="size-4 text-white" />
               </div>
               <span className="text-sm text-gray-600 font-medium">
-                {dialogHuddleTitle}
+                {huddleTitle}
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -641,13 +647,13 @@ function HuddleDialogContent({
             </div>
           </div>
 
-          {/* Participant View Area - Side by Side */}
+          {/* Participant View Area */}
           <div
             className={`flex-1 flex gap-4 p-4 overflow-hidden ${
               isScreenSharing ? "flex-row" : "flex-col"
             }`}
           >
-            {/* Screen Share Card - Show when someone is sharing */}
+            {/* Screen Share Card */}
             {isScreenSharing && screenSharingMemberId && (
               <div
                 className="flex-1 relative bg-black rounded-lg overflow-hidden border-2 border-green-500 cursor-pointer group"
@@ -670,7 +676,6 @@ function HuddleDialogContent({
                     });
                   }}
                 />
-                {/* Screen Share Label */}
                 <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/70 px-3 py-2 rounded">
                   <Monitor className="size-4 text-green-400" />
                   <span className="text-sm text-white font-medium">
@@ -686,7 +691,6 @@ function HuddleDialogContent({
                         })()}
                   </span>
                 </div>
-                {/* Click to fullscreen hint */}
                 <div className="absolute top-4 right-4 bg-black/70 px-3 py-2 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                   <span className="text-xs text-white">
                     Click to fullscreen
@@ -695,7 +699,7 @@ function HuddleDialogContent({
               </div>
             )}
 
-            {/* Participants Grid - Right side when screen sharing, full when not */}
+            {/* Participants Grid */}
             <div
               className={`flex gap-4 overflow-hidden ${
                 isScreenSharing ? "w-64 flex-col" : "flex-1 flex-row"
@@ -704,7 +708,6 @@ function HuddleDialogContent({
               {displayParticipants.length > 0 ? (
                 displayParticipants.map((participant) => {
                   const isYou = participant.isYou;
-                  const isWaiting = participant.status === "waiting";
                   const stream = isYou
                     ? localStream
                     : remoteStreams.get(participant.id);
@@ -716,8 +719,6 @@ function HuddleDialogContent({
                     stream
                       ?.getAudioTracks()
                       .some((t: MediaStreamTrack) => t.enabled) ?? false;
-
-                  // Check if this participant is the active speaker
                   const isActiveSpeaker = activeSpeakerId === participant.id;
 
                   return (
@@ -729,7 +730,7 @@ function HuddleDialogContent({
                           : "flex-1"
                       } relative flex flex-col items-center justify-center overflow-hidden rounded-md ${
                         isActiveSpeaker ? "ring-2 ring-[#5E2C5F]" : ""
-                      } ${isWaiting ? "opacity-50" : ""}`}
+                      }`}
                     >
                       {hasVideo ? (
                         <video
@@ -742,7 +743,6 @@ function HuddleDialogContent({
                                       participant.id,
                                       el
                                     );
-                                    // Set properties but don't play here - let the effect handle it
                                     if (!isYou) {
                                       el.muted = false;
                                       el.volume = 1.0;
@@ -759,7 +759,6 @@ function HuddleDialogContent({
                           muted={isYou}
                           className="w-full h-full object-cover"
                           onLoadedMetadata={(e) => {
-                            // Only play when metadata is loaded and element is ready
                             if (!isYou && e.currentTarget.readyState >= 2) {
                               const isPlaying = playingRefs.current.get(
                                 participant.id
@@ -787,7 +786,6 @@ function HuddleDialogContent({
                         />
                       ) : (
                         <>
-                          {/* Hidden audio element for audio-only streams */}
                           {!isYou && stream && hasAudio && (
                             <audio
                               ref={(el) => {
@@ -796,7 +794,6 @@ function HuddleDialogContent({
                                     participant.id,
                                     el
                                   );
-                                  // Set properties but don't play here - let the effect handle it
                                   if (stream) {
                                     el.srcObject = stream;
                                     el.muted = false;
@@ -812,7 +809,6 @@ function HuddleDialogContent({
                               playsInline
                             />
                           )}
-                          {/* Full-size avatar that fills the entire area */}
                           <div className="absolute inset-0 w-full h-full">
                             <Avatar className="w-full h-full rounded-none">
                               <AvatarImage
@@ -827,14 +823,6 @@ function HuddleDialogContent({
                         </>
                       )}
 
-                      {/* Loading overlay for waiting participants */}
-                      {isWaiting && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-md z-10">
-                          <Loader2 className="size-12 text-white animate-spin" />
-                        </div>
-                      )}
-
-                      {/* Participant Name and Status */}
                       <div className="absolute bottom-4 left-4 flex items-center gap-2 bg-black/50 px-2 py-1 rounded">
                         <span className="text-sm text-white font-medium">
                           {isYou ? "You" : participant.name}
@@ -896,7 +884,6 @@ function HuddleDialogContent({
               )}
             </Button>
 
-            {/* Video button - Phase 5: Enabled with LiveKit */}
             <Button
               variant="ghost"
               size="icon"
@@ -915,7 +902,6 @@ function HuddleDialogContent({
               )}
             </Button>
 
-            {/* Screen share button - Phase 5: Enabled with LiveKit */}
             <Button
               variant="ghost"
               size="icon"
@@ -963,30 +949,57 @@ function HuddleDialogContent({
   );
 }
 
-export function HuddleDialog({
+export function ChannelHuddleDialog({
   open,
   onOpenChange,
-  sharedData,
-}: HuddleDialogProps) {
-  const { isHuddleActive } = sharedData;
+  huddleId,
+  channelId,
+}: ChannelHuddleDialogProps) {
+  const workspaceId = useWorkspaceId();
+  const { data: currentMember } = useCurrentMember({ workspaceId });
+  const { data: participants } = useHuddleParticipants({ huddleId });
 
-  // Show join screen if not active (when not wrapped in HuddleMediaProvider)
-  if (!isHuddleActive) {
+  // Check if current user is already a participant
+  // Participants from getHuddleParticipants are already filtered to active participants
+  const isParticipant =
+    participants?.some((p) => p.memberId === currentMember?._id) ?? false;
+
+  const [hasJoined, setHasJoined] = useState(false);
+  const prevIsParticipantRef = useRef(isParticipant);
+
+  // Close dialog if user is no longer a participant (they left)
+  useEffect(() => {
+    // If user was a participant but is no longer, close the dialog
+    if (prevIsParticipantRef.current && !isParticipant && open) {
+      onOpenChange(false);
+      // Reset hasJoined in next tick to avoid setState in effect
+      setTimeout(() => setHasJoined(false), 0);
+    }
+    prevIsParticipantRef.current = isParticipant;
+  }, [isParticipant, open, onOpenChange]);
+
+  // Show join screen if not a participant
+  if (!isParticipant && !hasJoined) {
     return (
-      <HuddleDialogContent
+      <ChannelHuddleJoinScreen
         open={open}
         onOpenChange={onOpenChange}
-        sharedData={sharedData}
+        huddleId={huddleId}
+        channelId={channelId}
+        onJoinSuccess={() => setHasJoined(true)}
       />
     );
   }
 
-  // Active huddle - use the content component
+  // Show active view (wrapped in HuddleMediaProvider)
   return (
-    <HuddleDialogContent
-      open={open}
-      onOpenChange={onOpenChange}
-      sharedData={sharedData}
-    />
+    <HuddleMediaProvider enabled={open && (isParticipant || hasJoined)}>
+      <ChannelHuddleActiveView
+        open={open}
+        onOpenChange={onOpenChange}
+        huddleId={huddleId}
+        channelId={channelId}
+      />
+    </HuddleMediaProvider>
   );
 }

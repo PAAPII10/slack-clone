@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { HuddleBar } from "./HuddleBar";
 import { HuddleDialog } from "./HuddleDialog";
-import { HuddleMediaProvider } from "./HuddleMediaProvider";
+import { HuddleMediaProvider, useHuddleMedia } from "./HuddleMediaProvider";
 import { useGetHuddleByCurrentUser } from "../api/use-get-huddle-by-current-user";
 import { useCurrentMember } from "@/features/members/api/use-current-member";
 import { useGetChannel } from "@/features/channels/api/use-get-channel";
@@ -12,6 +12,55 @@ import { useGetMember } from "@/features/members/api/use-get-member";
 import { getUserDisplayName } from "@/lib/user-utils";
 import type { HuddleSharedData } from "./HuddleBar";
 import { Id } from "../../../../convex/_generated/dataModel";
+
+/**
+ * Inner component that has access to HuddleMedia context
+ * Used to track mute status of participants from LiveKit
+ */
+function HuddleCallInner({
+  sharedData,
+  isDialogOpen,
+  handleDialogOpenChange,
+}: {
+  sharedData: HuddleSharedData;
+  isDialogOpen: boolean;
+  handleDialogOpenChange: (open: boolean) => void;
+}) {
+  // Get mute status for all participants from HuddleMedia context
+  const { participantsMuteStatus } = useHuddleMedia();
+
+  // Update display participants with real mute status from LiveKit
+  const displayParticipantsWithMuteStatus = useMemo(() => {
+    return sharedData.displayParticipants.map((participant) => {
+      const muteStatus = participantsMuteStatus.get(participant.id);
+      return {
+        ...participant,
+        isMuted: muteStatus?.isMuted ?? participant.isMuted,
+        isSpeaking: muteStatus?.isSpeaking ?? false,
+      };
+    });
+  }, [sharedData.displayParticipants, participantsMuteStatus]);
+
+  // Create updated shared data with mute status
+  const sharedDataWithMuteStatus = useMemo(
+    () => ({
+      ...sharedData,
+      displayParticipants: displayParticipantsWithMuteStatus,
+    }),
+    [sharedData, displayParticipantsWithMuteStatus]
+  );
+
+  return (
+    <>
+      <HuddleDialog
+        open={isDialogOpen}
+        onOpenChange={handleDialogOpenChange}
+        sharedData={sharedDataWithMuteStatus}
+      />
+      <HuddleBar sharedData={sharedDataWithMuteStatus} />
+    </>
+  );
+}
 
 /**
  * Unified HuddleCall Component
@@ -65,7 +114,12 @@ export function HuddleCall() {
     ? closedHuddleIds.has(huddle._id)
     : false;
 
-  // Dialog is open if huddle is active and user hasn't manually closed it
+  // Derive dialog state directly - no need for effects or additional state
+  // Dialog should be open if:
+  // 1. Huddle is active, AND
+  // 2. User hasn't manually closed this specific huddle
+  // This prevents flicker during status transitions because we only care about
+  // the huddle ID and user action, not intermediate status changes
   const isDialogOpen = shouldDialogBeOpen && !isCurrentHuddleClosed;
 
   // Build shared data
@@ -98,7 +152,8 @@ export function HuddleCall() {
           role: (p.member._id === huddle.createdBy ? "host" : "participant") as
             | "host"
             | "participant",
-          isMuted: false, // TODO: Get from participant data if available
+          isMuted: false, // Will be updated by LiveKit mute status in HuddleCallInner
+          isSpeaking: false, // Will be updated by LiveKit in HuddleCallInner
           status: (
             p as typeof p & {
               participantStatus?: "waiting" | "joined" | "left";
@@ -173,12 +228,11 @@ export function HuddleCall() {
 
   return (
     <HuddleMediaProvider enabled={true}>
-      <HuddleDialog
-        open={isDialogOpen}
-        onOpenChange={handleDialogOpenChange}
+      <HuddleCallInner
         sharedData={sharedData}
+        isDialogOpen={isDialogOpen}
+        handleDialogOpenChange={handleDialogOpenChange}
       />
-      <HuddleBar sharedData={sharedData} />
     </HuddleMediaProvider>
   );
 }

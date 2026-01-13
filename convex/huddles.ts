@@ -636,18 +636,8 @@ export const leaveHuddle = mutation({
       args.huddleId
     );
 
-    // For 1-on-1 DM huddles, delete all signals and end huddle immediately
+    // For 1-on-1 DM huddles, end huddle immediately
     if (huddle.sourceType === "dm") {
-      // Delete all signals for this huddle
-      const allSignals = await ctx.db
-        .query("huddleSignals")
-        .withIndex("by_huddle_id", (q) => q.eq("huddleId", args.huddleId))
-        .collect();
-
-      for (const signal of allSignals) {
-        await ctx.db.delete(signal._id);
-      }
-
       // Mark all remaining participants as left
       for (const p of remainingParticipants) {
         const participantDoc = await ctx.db.get(p._id);
@@ -703,16 +693,6 @@ export const declineHuddle = mutation({
 
     const now = Date.now();
 
-    // Delete all signals for this huddle
-    const allSignals = await ctx.db
-      .query("huddleSignals")
-      .withIndex("by_huddle_id", (q) => q.eq("huddleId", args.huddleId))
-      .collect();
-
-    for (const signal of allSignals) {
-      await ctx.db.delete(signal._id);
-    }
-
     // Mark all participants as left
     const allParticipants = await ctx.db
       .query("huddleParticipants")
@@ -749,16 +729,6 @@ export const deleteHuddleData = internalMutation({
     huddleId: v.id("huddles"),
   },
   handler: async (ctx, args) => {
-    // Delete all signals for this huddle
-    const allSignals = await ctx.db
-      .query("huddleSignals")
-      .withIndex("by_huddle_id", (q) => q.eq("huddleId", args.huddleId))
-      .collect();
-
-    for (const signal of allSignals) {
-      await ctx.db.delete(signal._id);
-    }
-
     // Delete all participants for this huddle
     const allParticipants = await ctx.db
       .query("huddleParticipants")
@@ -989,153 +959,47 @@ export const getMyActiveHuddleByChannelId = query({
 });
 
 /**
- * Send a WebRTC signal (offer, answer, or ICE candidate)
- * Signals are ephemeral and used only for peer connection establishment
+ * Get active huddle for a channel with participant count
+ * Used to display "Join" button with member count in channel header
  */
-export const sendSignal = mutation({
+export const getActiveChannelHuddleWithCount = query({
   args: {
-    huddleId: v.id("huddles"),
-    toMemberId: v.id("members"),
-    signal: v.any(), // WebRTC signal object
+    channelId: v.id("channels"),
   },
   handler: async (ctx, args) => {
-    const huddle = await ctx.db.get(args.huddleId);
-    if (!huddle || !huddle.isActive) {
-      throw new Error("Huddle not found or not active");
+    const channel = await ctx.db.get(args.channelId);
+
+    if (!channel) {
+      return null;
     }
 
-    const memberId = await getCurrentMember(ctx, huddle.workspaceId);
-    if (!memberId) {
-      throw new Error("Unauthorized");
-    }
+    const huddle = await findActiveHuddleBySource(
+      ctx,
+      "channel",
+      args.channelId
+    );
 
-    // Verify sender is a participant
-    const senderParticipant = await ctx.db
-      .query("huddleParticipants")
-      .withIndex("by_huddle_id_member_id", (q) =>
-        q.eq("huddleId", args.huddleId).eq("memberId", memberId)
-      )
-      .unique();
-
-    if (!senderParticipant || senderParticipant.leftAt) {
-      throw new Error("Not a participant in this huddle");
-    }
-
-    // Verify receiver is a participant
-    const receiverParticipant = await ctx.db
-      .query("huddleParticipants")
-      .withIndex("by_huddle_id_member_id", (q) =>
-        q.eq("huddleId", args.huddleId).eq("memberId", args.toMemberId)
-      )
-      .unique();
-
-    if (!receiverParticipant || receiverParticipant.leftAt) {
-      throw new Error("Target member is not a participant");
-    }
-
-    // Insert signal
-    await ctx.db.insert("huddleSignals", {
-      huddleId: args.huddleId,
-      fromMemberId: memberId,
-      toMemberId: args.toMemberId,
-      signal: args.signal,
-      createdAt: Date.now(),
-    });
-  },
-});
-
-/**
- * Get signals for the current member in a huddle
- * Returns signals that are less than 30 seconds old
- */
-export const getSignals = query({
-  args: {
-    huddleId: v.id("huddles"),
-  },
-  handler: async (ctx, args) => {
-    const huddle = await ctx.db.get(args.huddleId);
-    if (!huddle || !huddle.isActive) {
-      return [];
-    }
-
-    const memberId = await getCurrentMember(ctx, huddle.workspaceId);
-    if (!memberId) {
-      return [];
-    }
-
-    // Get signals sent to this member
-    const now = Date.now();
-    const maxAge = 30000; // 30 seconds
-    const cutoffTime = now - maxAge;
-
-    const signals = await ctx.db
-      .query("huddleSignals")
-      .withIndex("by_huddle_id_to_member_id", (q) =>
-        q.eq("huddleId", args.huddleId).eq("toMemberId", memberId)
-      )
-      .filter((q) => q.gte(q.field("createdAt"), cutoffTime))
-      .collect();
-
-    // Return signals sorted by creation time
-    return signals
-      .sort((a, b) => a.createdAt - b.createdAt)
-      .map((s) => ({
-        _id: s._id,
-        fromMemberId: s.fromMemberId,
-        toMemberId: s.toMemberId,
-        signal: s.signal,
-        createdAt: s.createdAt,
-      }));
-  },
-});
-
-/**
- * Clear old signals for a huddle (cleanup)
- * Signals older than 1 minute are automatically ignored, but this helps with cleanup
- */
-export const clearOldSignals = mutation({
-  args: {
-    huddleId: v.id("huddles"),
-  },
-  handler: async (ctx, args) => {
-    const huddle = await ctx.db.get(args.huddleId);
     if (!huddle) {
-      return;
+      return null;
     }
 
-    const memberId = await getCurrentMember(ctx, huddle.workspaceId);
-    if (!memberId) {
-      throw new Error("Unauthorized");
-    }
-
-    // Only host can clear signals
-    const participant = await ctx.db
+    // Get count of joined participants (status === "joined" and leftAt is undefined)
+    const participants = await ctx.db
       .query("huddleParticipants")
-      .withIndex("by_huddle_id_member_id", (q) =>
-        q.eq("huddleId", args.huddleId).eq("memberId", memberId)
-      )
-      .unique();
-
-    if (!participant || participant.role !== "host" || participant.leftAt) {
-      throw new Error("Only host can clear signals");
-    }
-
-    // Delete signals older than 1 minute
-    const now = Date.now();
-    const maxAge = 60000; // 1 minute
-    const cutoffTime = now - maxAge;
-
-    const oldSignals = await ctx.db
-      .query("huddleSignals")
-      .withIndex("by_huddle_id", (q) => q.eq("huddleId", args.huddleId))
-      .filter((q) => q.lt(q.field("createdAt"), cutoffTime))
+      .withIndex("by_huddle_id", (q) => q.eq("huddleId", huddle._id))
+      .filter((q) => q.eq(q.field("status"), "joined"))
+      .filter((q) => q.eq(q.field("leftAt"), undefined))
       .collect();
 
-    for (const signal of oldSignals) {
-      await ctx.db.delete(signal._id);
-    }
+    return {
+      huddleId: huddle._id,
+      participantCount: participants.length,
+    };
   },
 });
+
+// WebRTC signaling functions removed - sendSignal, getSignals, clearOldSignals
+// Signaling will be handled by LiveKit in Phase 2
 
 export const getIncomingHuddle = query({
   args: {
@@ -1238,5 +1102,29 @@ export const joinHuddleByHuddleId = mutation({
     });
 
     return args.huddleId;
+  },
+});
+
+export const closeChannelHuddleWhenNoParticipants = mutation({
+  args: {
+    channelId: v.id("channels"),
+  },
+  handler: async (ctx, args) => {
+    const huddle = await findActiveHuddleBySource(
+      ctx,
+      "channel",
+      args.channelId
+    );
+    if (!huddle) {
+      throw new Error("Huddle not found");
+    }
+
+    await ctx.db.patch(huddle._id, {
+      status: "ended",
+      endedAt: Date.now(),
+      isActive: false,
+    });
+
+    return huddle._id;
   },
 });

@@ -21,15 +21,8 @@ export function useAudioDevices() {
       setIsLoading(true);
       setError(null);
 
-      // Request permission first by getting user media
-      // This ensures device labels are available
-      try {
-        await navigator.mediaDevices.getUserMedia({ audio: true });
-      } catch (permError) {
-        // Permission denied - we can still enumerate but labels will be empty
-        console.warn("Microphone permission not granted:", permError);
-      }
-
+      // getUserMedia removed for Phase 1 cleanup - will be handled by LiveKit in Phase 2
+      // Note: Without getUserMedia permission, device labels may be empty
       const deviceList = await navigator.mediaDevices.enumerateDevices();
       
       const audioDevices: AudioDevice[] = deviceList

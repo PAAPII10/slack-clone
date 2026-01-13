@@ -67,6 +67,7 @@ export interface HuddleSharedData {
     isYou: boolean;
     role: "host" | "participant";
     isMuted: boolean;
+    isSpeaking?: boolean;
     status?: "waiting" | "joined" | "left";
   }>;
   disconnectedHuddle: {
@@ -95,10 +96,10 @@ export interface HuddleSharedData {
  * Presentational component that displays huddle controls in the sidebar.
  * Receives all data from parent HuddleCall component.
  *
- * PHASE 3: WebRTC Integration
- * - Real-time audio/video using simple-peer (P2P mesh)
+ * PHASE 3: LiveKit Integration (Phase 1 cleanup complete - WebRTC removed)
+ * - Real-time audio/video using LiveKit (replacing simple-peer)
  * - Media controls (mute, video, screen share)
- * - Convex signaling for WebRTC
+ * - LiveKit handles signaling (no custom Convex signaling needed)
  */
 
 interface HuddleBarProps {
@@ -467,17 +468,16 @@ export function HuddleBar({ sharedData }: HuddleBarProps) {
             )}
           </Button>
 
-          {/* Video button */}
+          {/* Video button - Phase 5: Enabled with LiveKit */}
           <Button
             variant="ghost"
             size="icon"
-            className={`size-9 rounded-full border-0 transition-all opacity-50 cursor-not-allowed ${
+            className={`size-9 rounded-full border-0 transition-all ${
               !isVideoEnabled
-                ? "bg-black/20 text-white"
-                : "bg-green-500/20 text-white"
+                ? "bg-black/20 hover:bg-black/30 text-white"
+                : "bg-green-500/20 hover:bg-green-500/30 text-white"
             }`}
-            title="Video disabled"
-            disabled
+            title={isVideoEnabled ? "Turn off camera" : "Turn on camera"}
             onClick={toggleVideo}
           >
             {!isVideoEnabled ? (
@@ -487,17 +487,16 @@ export function HuddleBar({ sharedData }: HuddleBarProps) {
             )}
           </Button>
 
-          {/* Screen share button */}
+          {/* Screen share button - Phase 5: Enabled with LiveKit */}
           <Button
             variant="ghost"
             size="icon"
-            className={`size-9 rounded-full border-0 transition-all opacity-50 cursor-not-allowed ${
+            className={`size-9 rounded-full border-0 transition-all ${
               isScreenSharing
-                ? "bg-green-500/20 text-white"
-                : "bg-black/20 text-white"
+                ? "bg-green-500/20 hover:bg-green-500/30 text-white"
+                : "bg-black/20 hover:bg-black/30 text-white"
             }`}
-            title="Screen sharing disabled"
-            disabled
+            title={isScreenSharing ? "Stop sharing screen" : "Share screen"}
             onClick={toggleScreenShare}
           >
             <Monitor className="size-4.5" />

@@ -8,21 +8,31 @@ import {
   useState,
   useCallback,
   ReactNode,
+  useMemo,
 } from "react";
 import { playHuddleSound } from "@/lib/huddle-sounds";
 import { Id } from "../../../../convex/_generated/dataModel";
-import { useWebRTC } from "../hooks/use-webrtc";
-import { useHuddleState } from "../store/use-huddle-state";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { useHuddleAudioSettings } from "../hooks/use-huddle-audio-settings";
 import { getAudioContextConstructor } from "@/lib/audio-context-types";
 import { useUpdateMuteStatus } from "../api/use-update-mute-status";
 import { useGetHuddleByCurrentUser } from "../api/use-get-huddle-by-current-user";
+import { LiveKitRoomWrapper, getLiveKitRoomName } from "./LiveKitRoom";
+import { useLiveKitToken } from "../hooks/use-livekit-token";
+import { useCurrentMember } from "@/features/members/api/use-current-member";
+import {
+  useTracks,
+  useLocalParticipant,
+  useRemoteParticipants,
+} from "@livekit/components-react";
+import { Track } from "livekit-client";
 
 interface HuddleMediaContextValue {
   localStream: MediaStream | null;
   screenStream: MediaStream | null;
   remoteStreams: Map<Id<"members">, MediaStream>;
+  remoteScreenShares: Map<Id<"members">, MediaStream>; // Separate map for remote screen shares
+  screenSharingMemberId: Id<"members"> | null; // Who is currently sharing (local or remote)
   isAudioEnabled: boolean;
   isVideoEnabled: boolean;
   isScreenSharing: boolean;
@@ -35,6 +45,11 @@ interface HuddleMediaContextValue {
   cleanup: () => void;
   isLoading: boolean;
   error: Error | null;
+  // Mute status tracking
+  participantsMuteStatus: Map<
+    string,
+    { isMuted: boolean; isSpeaking: boolean }
+  >;
 }
 
 const HuddleMediaContext = createContext<HuddleMediaContextValue | undefined>(
@@ -47,9 +62,426 @@ interface HuddleMediaProviderProps {
 }
 
 /**
+ * Inner component that uses LiveKit hooks
+ * Must be rendered inside LiveKitRoom context
+ */
+function LiveKitMediaProviderInner({
+  children: roomChildren,
+  activeHuddle,
+  updateMuteStatus,
+  setLocalStream,
+  setScreenStream,
+  setIsScreenSharing,
+  setIsMuted,
+  setIsVideoEnabled,
+  setError,
+  tokenLoading,
+  error,
+  currentMemberId,
+}: {
+  children: ReactNode;
+  activeHuddle: { _id: Id<"huddles"> } | null | undefined;
+  updateMuteStatus: (props: {
+    huddleId: Id<"huddles">;
+    isMuted: boolean;
+  }) => Promise<unknown>;
+  setLocalStream: (stream: MediaStream | null) => void;
+  setScreenStream: (stream: MediaStream | null) => void;
+  setIsScreenSharing: (sharing: boolean) => void;
+  setIsMuted: (muted: boolean) => void;
+  setIsVideoEnabled: (enabled: boolean) => void;
+  setError: (error: Error | null) => void;
+  tokenLoading: boolean;
+  error: Error | null;
+  currentMemberId: Id<"members"> | null;
+}) {
+  // Get LiveKit tracks and participants
+  // Note: Audio settings (device, noise cancellation) are handled by LiveKitRoomWrapper
+  const tracks = useTracks(
+    [
+      { source: Track.Source.Camera, withPlaceholder: true },
+      { source: Track.Source.Microphone, withPlaceholder: true },
+      { source: Track.Source.ScreenShare, withPlaceholder: true },
+    ],
+    { onlySubscribed: false }
+  );
+
+  const localParticipant = useLocalParticipant();
+  const remoteParticipants = useRemoteParticipants();
+
+  // Build mute status map directly from LiveKit participants
+  // This is simpler than maintaining a separate hook with event listeners
+  const participantsMuteStatus = useMemo(() => {
+    const statusMap = new Map<
+      string,
+      { isMuted: boolean; isSpeaking: boolean }
+    >();
+
+    // Add local participant
+    if (localParticipant.localParticipant) {
+      statusMap.set(localParticipant.localParticipant.identity, {
+        isMuted: !localParticipant.isMicrophoneEnabled,
+        isSpeaking: localParticipant.localParticipant.isSpeaking,
+      });
+    }
+
+    // Add remote participants
+    remoteParticipants.forEach((participant) => {
+      statusMap.set(participant.identity, {
+        isMuted: !participant.isMicrophoneEnabled,
+        isSpeaking: participant.isSpeaking,
+      });
+    });
+
+    return statusMap;
+  }, [
+    localParticipant.localParticipant,
+    localParticipant.isMicrophoneEnabled,
+    remoteParticipants,
+  ]);
+
+  // Phase 6: Get room connection state
+  // Derive connection state directly from localParticipant to avoid setState in effect
+  const isRoomConnected = !!localParticipant.localParticipant;
+  
+  // Log connection status changes
+  const prevConnectedRef = useRef(false);
+  useEffect(() => {
+    if (isRoomConnected && !prevConnectedRef.current) {
+      console.log("✓ Room connection established, local participant ready");
+    }
+    prevConnectedRef.current = isRoomConnected;
+  }, [isRoomConnected]);
+
+  const isConnecting = !isRoomConnected;
+
+  // Phase 6: Multi-Participant Support
+  // Build remote streams map from LiveKit tracks
+  // Maps LiveKit participant identity (memberId) to MediaStream objects
+  // Supports unlimited participants (not just 2)
+  // Automatically handles join/leave events via LiveKit's useRemoteParticipants hook
+  const { liveKitRemoteStreams, liveKitRemoteScreenShares } = useMemo(() => {
+    const streams = new Map<Id<"members">, MediaStream>();
+    const screenShares = new Map<Id<"members">, MediaStream>();
+
+    // Create a set of active participant identities for quick lookup
+    const activeParticipantIdentities = new Set(
+      remoteParticipants.map((p) => p.identity)
+    );
+
+    // Group tracks by participant identity (which is memberId from token)
+    const tracksByParticipant = new Map<
+      string,
+      {
+        audio?: MediaStreamTrack;
+        video?: MediaStreamTrack;
+        screenShare?: MediaStreamTrack;
+      }
+    >();
+
+    // Process all tracks and group by participant
+    // LiveKit automatically provides tracks for all remote participants
+    tracks.forEach((trackRef) => {
+      // Skip placeholders and local tracks
+      if ("placeholder" in trackRef || trackRef.participant.isLocal) {
+        return;
+      }
+
+      const participantIdentity = trackRef.participant.identity;
+      const mediaTrack = trackRef.publication?.track?.mediaStreamTrack;
+
+      if (!participantIdentity || !mediaTrack) {
+        return;
+      }
+
+      // CRITICAL: Only process tracks for participants that are still present
+      // This prevents the "Tried to add a track for a participant, that's not present" error
+      // when someone leaves the huddle
+      if (!activeParticipantIdentities.has(participantIdentity)) {
+        return;
+      }
+
+      // Get or create participant track group
+      let participantTracks = tracksByParticipant.get(participantIdentity);
+      if (!participantTracks) {
+        participantTracks = {};
+        tracksByParticipant.set(participantIdentity, participantTracks);
+      }
+
+      // Add track based on source
+      if (trackRef.source === Track.Source.Microphone) {
+        participantTracks.audio = mediaTrack;
+      } else if (trackRef.source === Track.Source.Camera) {
+        participantTracks.video = mediaTrack;
+      } else if (trackRef.source === Track.Source.ScreenShare) {
+        participantTracks.screenShare = mediaTrack;
+      }
+    });
+
+    // Build MediaStream objects for each remote participant
+    // This supports unlimited participants - each gets their own stream
+    tracksByParticipant.forEach((participantTracks, participantIdentity) => {
+      // Convert participant identity (string) to memberId (Id<"members">)
+      // Identity is set to memberId in the token (Phase 4)
+      const memberId = participantIdentity as Id<"members">;
+
+      // Separate screen share streams
+      if (participantTracks.screenShare) {
+        screenShares.set(
+          memberId,
+          new MediaStream([participantTracks.screenShare])
+        );
+      }
+
+      // Build regular video/audio stream (excluding screen share)
+      const streamTracks: MediaStreamTrack[] = [];
+      if (participantTracks.video) {
+        streamTracks.push(participantTracks.video);
+      }
+      if (participantTracks.audio) {
+        streamTracks.push(participantTracks.audio);
+      }
+
+      // Only create stream if there are tracks
+      if (streamTracks.length > 0) {
+        streams.set(memberId, new MediaStream(streamTracks));
+      }
+    });
+
+    return {
+      liveKitRemoteStreams: streams,
+      liveKitRemoteScreenShares: screenShares,
+    };
+  }, [tracks, remoteParticipants]); // Include remoteParticipants to filter out disconnected participants
+
+  // Get local tracks from participant
+  const localAudioTrack = localParticipant.microphoneTrack;
+  const localVideoTrack = localParticipant.cameraTrack;
+
+  // Find screen share track from tracks array
+  const localScreenTrack = tracks.find(
+    (trackRef) =>
+      !("placeholder" in trackRef) &&
+      trackRef.source === Track.Source.ScreenShare &&
+      trackRef.participant.isLocal
+  );
+
+  // Build local stream from LiveKit tracks
+  // LiveKit handles audio settings (device, noise cancellation, etc.) natively via LiveKitRoomWrapper
+  const liveKitLocalStream = useMemo(() => {
+    const trackArray: MediaStreamTrack[] = [];
+
+    // Add audio track
+    if (localAudioTrack?.track?.mediaStreamTrack) {
+      trackArray.push(localAudioTrack.track.mediaStreamTrack);
+    }
+
+    // Add video track
+    if (localVideoTrack?.track?.mediaStreamTrack) {
+      trackArray.push(localVideoTrack.track.mediaStreamTrack);
+    }
+
+    return trackArray.length > 0 ? new MediaStream(trackArray) : null;
+  }, [localAudioTrack, localVideoTrack]);
+
+  // Build screen stream
+  const liveKitScreenStream = useMemo(() => {
+    if (!localScreenTrack || "placeholder" in localScreenTrack) return null;
+    const mediaTrack = localScreenTrack.publication?.track?.mediaStreamTrack;
+    if (!mediaTrack) return null;
+    return new MediaStream([mediaTrack]);
+  }, [localScreenTrack]);
+
+  // Phase 6: Handle participant join/leave events automatically
+  // LiveKit automatically manages participant list via useRemoteParticipants
+  // We just need to update our remote streams map when participants change
+
+  // Update state from LiveKit
+  useEffect(() => {
+    setLocalStream(liveKitLocalStream);
+  }, [liveKitLocalStream, setLocalStream]);
+
+  useEffect(() => {
+    setScreenStream(liveKitScreenStream);
+    setIsScreenSharing(!!liveKitScreenStream);
+  }, [liveKitScreenStream, setScreenStream, setIsScreenSharing]);
+
+  // Phase 6: Log participant join/leave events for debugging
+  useEffect(() => {
+    console.log("LiveKit remote participants:", {
+      count: remoteParticipants.length,
+      identities: remoteParticipants.map((p) => p.identity),
+    });
+  }, [remoteParticipants]);
+
+  // Update mute state from LiveKit
+  // This syncs UI state with LiveKit's actual microphone state
+  useEffect(() => {
+    const muted = localParticipant.isMicrophoneEnabled === false;
+    setIsMuted(muted);
+    console.log("Mute state synced from LiveKit:", {
+      isMicrophoneEnabled: localParticipant.isMicrophoneEnabled,
+      muted,
+    });
+  }, [localParticipant.isMicrophoneEnabled, setIsMuted]);
+
+  // Update video state from LiveKit
+  useEffect(() => {
+    const videoEnabled = !!localParticipant.cameraTrack;
+    setIsVideoEnabled(videoEnabled);
+  }, [localParticipant.cameraTrack, setIsVideoEnabled]);
+
+  // Override toggle functions to use LiveKit
+  const liveKitToggleAudio = useCallback(async () => {
+    if (!localParticipant.localParticipant) {
+      console.warn("Cannot toggle audio: localParticipant not available");
+      setError(new Error("Cannot toggle microphone: not connected to LiveKit"));
+      return;
+    }
+
+    // Wait for connection to be ready before attempting to toggle
+    if (!isRoomConnected) {
+      console.warn("Cannot toggle audio: room not yet connected");
+      return;
+    }
+
+    try {
+      // Toggle microphone: if currently enabled, disable it (mute), and vice versa
+      const currentlyEnabled = localParticipant.isMicrophoneEnabled;
+      const newEnabled = !currentlyEnabled;
+      const newMuted = !newEnabled; // muted = not enabled
+
+      console.log("Toggling microphone:", {
+        currentlyEnabled,
+        newEnabled,
+        newMuted,
+        hasLocalParticipant: !!localParticipant.localParticipant,
+        isRoomConnected,
+      });
+
+      // Use await to ensure the operation completes
+      await localParticipant.localParticipant.setMicrophoneEnabled(newEnabled);
+
+      // Update local state immediately for responsive UI
+      setIsMuted(newMuted);
+
+      // Update backend mute status
+      if (activeHuddle) {
+        updateMuteStatus({
+          huddleId: activeHuddle._id,
+          isMuted: newMuted,
+        }).catch((err) => {
+          console.error("Failed to update mute status:", err);
+        });
+      }
+    } catch (err) {
+      console.error("Error toggling microphone:", err);
+      setError(
+        err instanceof Error ? err : new Error("Failed to toggle microphone")
+      );
+    }
+  }, [
+    localParticipant,
+    activeHuddle,
+    updateMuteStatus,
+    setIsMuted,
+    setError,
+    isRoomConnected,
+  ]);
+
+  const liveKitToggleVideo = useCallback(async () => {
+    if (!localParticipant.localParticipant || !isRoomConnected) {
+      console.warn("Cannot toggle video: room not connected");
+      return;
+    }
+
+    const newVideoEnabled = !localParticipant.cameraTrack;
+    await localParticipant.localParticipant.setCameraEnabled(newVideoEnabled);
+    setIsVideoEnabled(newVideoEnabled);
+  }, [localParticipant, setIsVideoEnabled, isRoomConnected]);
+
+  const liveKitToggleScreenShare = useCallback(async () => {
+    if (!localParticipant.localParticipant || !isRoomConnected) {
+      console.warn("Cannot toggle screen share: room not connected");
+      return;
+    }
+
+    const currentlySharing = !!liveKitScreenStream;
+    if (currentlySharing) {
+      // Stop screen sharing
+      playHuddleSound("screen_sharing_stop");
+      await localParticipant.localParticipant.setScreenShareEnabled(false);
+      setIsScreenSharing(false);
+    } else {
+      // Start screen sharing
+      try {
+        await localParticipant.localParticipant.setScreenShareEnabled(true);
+        playHuddleSound("screen_sharing_start");
+        setIsScreenSharing(true);
+      } catch (err) {
+        console.error("Error starting screen share:", err);
+        setError(err as Error);
+      }
+    }
+  }, [
+    localParticipant,
+    liveKitScreenStream,
+    setIsScreenSharing,
+    setError,
+    isRoomConnected,
+  ]);
+
+  // Determine who is sharing screen (local or remote)
+  const screenSharingMemberId = useMemo(() => {
+    // Check if local user is sharing
+    if (liveKitScreenStream && currentMemberId) {
+      return currentMemberId;
+    }
+    // Check if any remote participant is sharing
+    if (liveKitRemoteScreenShares.size > 0) {
+      // Return the first remote participant who is sharing
+      return liveKitRemoteScreenShares.keys().next().value || null;
+    }
+    return null;
+  }, [liveKitScreenStream, liveKitRemoteScreenShares, currentMemberId]);
+
+  const value: HuddleMediaContextValue = {
+    localStream: liveKitLocalStream,
+    screenStream: liveKitScreenStream,
+    remoteStreams: liveKitRemoteStreams,
+    remoteScreenShares: liveKitRemoteScreenShares,
+    screenSharingMemberId,
+    isAudioEnabled: true, // LiveKit always has audio capability
+    isVideoEnabled: !!localParticipant.cameraTrack,
+    isScreenSharing:
+      !!liveKitScreenStream || liveKitRemoteScreenShares.size > 0,
+    isMuted: localParticipant.isMicrophoneEnabled === false,
+    isConnecting,
+    toggleAudio: liveKitToggleAudio,
+    toggleVideo: liveKitToggleVideo,
+    toggleScreenShare: liveKitToggleScreenShare,
+    initializeMedia: async () => {
+      // LiveKit handles initialization automatically
+    },
+    cleanup: () => {
+      // LiveKit handles cleanup automatically
+    },
+    isLoading: tokenLoading,
+    error,
+    participantsMuteStatus, // Already in the correct format
+  };
+
+  return (
+    <HuddleMediaContext.Provider value={value}>
+      {roomChildren}
+    </HuddleMediaContext.Provider>
+  );
+}
+
+/**
  * Provider component that manages media streams (audio, video, screen sharing)
- * Uses browser WebRTC constraints for noise cancellation
- * Also manages WebRTC peer connections for remote streams
+ * Phase 2: Now uses LiveKit for real-time communication
+ * Replaces custom WebRTC implementation with LiveKit
  */
 export function HuddleMediaProvider({
   children,
@@ -58,8 +490,56 @@ export function HuddleMediaProvider({
   const workspaceId = useWorkspaceId();
 
   const { data: activeHuddle } = useGetHuddleByCurrentUser({ workspaceId });
+  const { data: currentMember } = useCurrentMember({
+    workspaceId: workspaceId || ("" as Id<"workspaces">),
+  });
 
-  const isHuddleActive = activeHuddle && Boolean(activeHuddle && enabled);
+  const isHuddleActive = Boolean(activeHuddle && enabled);
+
+  // Phase 3: Generate LiveKit room name from huddle scope
+  // Room name is scoped to either channelId (channel huddles) or conversationId (DM huddles)
+  const roomName = useMemo(() => {
+    if (!activeHuddle) return null;
+
+    // Validate huddle has proper scope
+    const hasChannelScope = Boolean(activeHuddle.channelId);
+    const hasConversationScope = Boolean(activeHuddle.conversationId);
+
+    // A huddle should have exactly one scope based on sourceType
+    if (activeHuddle.sourceType === "channel" && !hasChannelScope) {
+      console.error("Channel huddle missing channelId", activeHuddle);
+      return null;
+    }
+    if (activeHuddle.sourceType === "dm" && !hasConversationScope) {
+      console.error("DM huddle missing conversationId", activeHuddle);
+      return null;
+    }
+
+    // Generate room name from scope
+    const name = getLiveKitRoomName(
+      activeHuddle.channelId || null,
+      activeHuddle.conversationId || null
+    );
+
+    if (!name) {
+      console.error("Failed to generate room name for huddle", activeHuddle);
+    }
+
+    return name;
+  }, [activeHuddle]);
+
+  // Phase 4: Get LiveKit token and server URL from API
+  // Token includes participant identity (memberId) and room permissions
+  const {
+    token,
+    serverUrl,
+    isLoading: tokenLoading,
+    error: tokenError,
+  } = useLiveKitToken({
+    roomName: roomName || "",
+    enabled: isHuddleActive && Boolean(currentMember?._id),
+    participantIdentity: currentMember?._id || null,
+  });
   // Audio settings
   const { settings } = useHuddleAudioSettings();
 
@@ -310,57 +790,10 @@ export function HuddleMediaProvider({
           processedStreamRef.current = null;
         }
 
-        const constraints = getMediaConstraints(isAudioEnabled, isVideoEnabled);
-        const rawStream = await navigator.mediaDevices.getUserMedia(
-          constraints
-        );
-
-        const rawAudioTrack = rawStream.getAudioTracks()[0] || null;
-        if (rawAudioTrack) {
-          rawAudioTrack.enabled = true;
-          rawAudioTrackRef.current = rawAudioTrack;
-        }
-
-        // Apply Web Audio API gain control if audio is enabled
-        let processedStream: MediaStream;
-        if (isAudioEnabled) {
-          try {
-            processedStream = applyGainControl(rawStream);
-            // Verify the processed stream is valid
-            const processedAudioTracks = processedStream.getAudioTracks();
-            if (processedAudioTracks.length === 0) {
-              console.warn(
-                "Processed stream has no audio tracks, using raw stream"
-              );
-              processedStream = rawStream;
-            }
-          } catch (error) {
-            console.error(
-              "Error applying gain control, using raw stream:",
-              error
-            );
-            processedStream = rawStream;
-          }
-        } else {
-          processedStream = rawStream;
-        }
-
-        // Ensure processed stream audio tracks are enabled
-        processedStream.getAudioTracks().forEach((track) => {
-          track.enabled = true;
-        });
-
-        console.log("Initialized media stream:", {
-          audioTracks: processedStream.getAudioTracks().length,
-          videoTracks: processedStream.getVideoTracks().length,
-          audioEnabled: processedStream
-            .getAudioTracks()
-            .filter((t: MediaStreamTrack) => t.enabled).length,
-          usingGainControl: isAudioEnabled && processedStream !== rawStream,
-        });
-
-        localStreamRef.current = processedStream;
-        setLocalStream(processedStream);
+        // WebRTC getUserMedia removed - will be replaced with LiveKit in Phase 2
+        // For now, set empty stream to maintain interface compatibility
+        localStreamRef.current = null;
+        setLocalStream(null);
       } catch (err) {
         const error = err as Error;
         setError(error);
@@ -372,18 +805,23 @@ export function HuddleMediaProvider({
     [isAudioEnabled, isVideoEnabled, getMediaConstraints, applyGainControl]
   );
 
-  // Toggle audio
-  const toggleAudio = useCallback(() => {
-    if (!localStreamRef.current) {
-      setIsMuted(!isMuted);
-      return;
-    }
+  // Phase 5: Media Controls - Use LiveKit APIs only
+  // These are fallback implementations when not connected to LiveKit
+  // When connected, LiveKitMediaProviderInner provides the actual LiveKit implementations
 
+  // Toggle audio (fallback - LiveKit version is in LiveKitMediaProviderInner)
+  // This is used when not connected to LiveKit (token loading, connection failed, etc.)
+  const toggleAudio = useCallback(() => {
+    // Phase 5: When not connected to LiveKit, just update state
+    // Note: This won't actually control the mic until connected to LiveKit
     const newMuted = !isMuted;
     setIsMuted(newMuted);
 
-    localStreamRef.current.getAudioTracks().forEach((track) => {
-      track.enabled = !newMuted;
+    console.log("Toggle audio (fallback - not connected to LiveKit):", {
+      currentMuted: isMuted,
+      newMuted,
+      isHuddleActive,
+      hasToken: !!token,
     });
 
     // Update backend mute status
@@ -395,121 +833,27 @@ export function HuddleMediaProvider({
         console.error("Failed to update mute status:", err);
       });
     }
-  }, [isMuted, activeHuddle, updateMuteStatus]);
+  }, [isMuted, activeHuddle, updateMuteStatus, isHuddleActive, token]);
 
-  // Toggle video
+  // Toggle video (fallback - LiveKit version is in LiveKitMediaProviderInner)
   const toggleVideo = useCallback(async () => {
-    if (!localStreamRef.current) {
-      setIsVideoEnabled(!isVideoEnabled);
-      return;
-    }
+    // Phase 5: When not connected to LiveKit, just update state
+    // LiveKit handles actual camera control when connected
+    setIsVideoEnabled(!isVideoEnabled);
+  }, [isVideoEnabled]);
 
-    const newVideoEnabled = !isVideoEnabled;
-    setIsVideoEnabled(newVideoEnabled);
-
-    if (newVideoEnabled) {
-      // Add video track
-      try {
-        const constraints = getMediaConstraints(false, true);
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        const videoTrack = stream.getVideoTracks()[0];
-        if (videoTrack && localStreamRef.current) {
-          localStreamRef.current.addTrack(videoTrack);
-          setLocalStream(new MediaStream(localStreamRef.current));
-        }
-        stream.getTracks().forEach((track) => {
-          if (track.kind !== "video") {
-            track.stop();
-          }
-        });
-      } catch (err) {
-        console.error("Error enabling video:", err);
-        setIsVideoEnabled(false);
-      }
-    } else {
-      // Remove video track
-      localStreamRef.current.getVideoTracks().forEach((track) => {
-        track.stop();
-        localStreamRef.current?.removeTrack(track);
-      });
-      setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
-    }
-  }, [isVideoEnabled, getMediaConstraints]);
-
-  // Toggle screen sharing
+  // Toggle screen sharing (fallback - LiveKit version is in LiveKitMediaProviderInner)
   const toggleScreenShare = useCallback(async () => {
+    // Phase 5: When not connected to LiveKit, just update state
+    // LiveKit handles actual screen share control when connected
     if (isScreenSharing) {
-      // Stop screen sharing
       playHuddleSound("screen_sharing_stop");
-      if (screenStreamRef.current) {
-        screenStreamRef.current.getTracks().forEach((track) => track.stop());
-        screenStreamRef.current = null;
-        setScreenStream(null);
-      }
       setIsScreenSharing(false);
-
-      // Restore video if it was enabled
-      if (isVideoEnabled && localStreamRef.current) {
-        try {
-          const constraints = getMediaConstraints(false, true);
-          const stream = await navigator.mediaDevices.getUserMedia(constraints);
-          const videoTrack = stream.getVideoTracks()[0];
-          if (videoTrack && localStreamRef.current) {
-            localStreamRef.current.addTrack(videoTrack);
-            setLocalStream(new MediaStream(localStreamRef.current));
-          }
-          stream.getTracks().forEach((track) => {
-            if (track.kind !== "video") {
-              track.stop();
-            }
-          });
-        } catch (err) {
-          console.error("Error restoring video:", err);
-        }
-      }
     } else {
-      // Start screen sharing
-      try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            cursor: "always",
-            displaySurface: "monitor",
-          } as MediaTrackConstraints,
-          audio: true,
-        });
-
-        // Play screen sharing start sound
-        playHuddleSound("screen_sharing_start");
-        screenStreamRef.current = stream;
-        setScreenStream(stream);
-
-        // Replace video track in local stream with screen share
-        if (localStreamRef.current) {
-          const oldVideoTracks = localStreamRef.current.getVideoTracks();
-          oldVideoTracks.forEach((track) => {
-            track.stop();
-            localStreamRef.current?.removeTrack(track);
-          });
-
-          const screenVideoTrack = stream.getVideoTracks()[0];
-          if (screenVideoTrack && localStreamRef.current) {
-            localStreamRef.current.addTrack(screenVideoTrack);
-            setLocalStream(new MediaStream(localStreamRef.current));
-          }
-        }
-
-        setIsScreenSharing(true);
-
-        // Handle screen share end (user clicks stop in browser UI)
-        stream.getVideoTracks()[0].addEventListener("ended", () => {
-          toggleScreenShare();
-        });
-      } catch (err) {
-        console.error("Error starting screen share:", err);
-        setError(err as Error);
-      }
+      playHuddleSound("screen_sharing_start");
+      setIsScreenSharing(true);
     }
-  }, [isScreenSharing, isVideoEnabled, getMediaConstraints]);
+  }, [isScreenSharing]);
 
   // Cleanup
   const cleanup = useCallback(() => {
@@ -625,29 +969,107 @@ export function HuddleMediaProvider({
     };
   }, [cleanup]);
 
-  // WebRTC connections - managed here so both HuddleBar and HuddleDialog share the same connections
-  const { remoteStreams, isConnecting } = useWebRTC({
-    huddleId: activeHuddle?._id || null,
-    localStream,
-    enabled: Boolean(isHuddleActive && activeHuddle?._id),
-  });
+  // Phase 4: Join/Leave Logic
+  // Join huddle: Connect via LiveKitRoom when token is available
+  // Leave huddle: Disconnect when huddle becomes inactive (handled by LiveKitRoom)
+  // Reconnects: Handled automatically by LiveKitRoom
 
+  // Combine token errors with other errors
+  useEffect(() => {
+    if (tokenError) {
+      setError(tokenError);
+    }
+  }, [tokenError]);
+
+  // Phase 4: Reconnection is handled automatically by LiveKitRoom
+  // When token refreshes or connection drops, LiveKitRoom will attempt to reconnect
+
+  // Wrap children with LiveKitRoom if huddle is active and token is available
+  if (isHuddleActive && roomName && token && serverUrl) {
+    return (
+      <LiveKitRoomWrapper
+        roomName={roomName}
+        token={token}
+        serverUrl={serverUrl}
+        enabled={isHuddleActive}
+        onConnected={() => {
+          // Phase 4: Join successful - LiveKit handles track initialization
+          setError(null);
+          console.log("Joined LiveKit room:", roomName);
+        }}
+        onDisconnected={() => {
+          // Phase 4: Leave/Disconnect - LiveKit handles cleanup
+          console.log("Disconnected from LiveKit room:", roomName);
+          // Cleanup local state
+          setLocalStream(null);
+          setScreenStream(null);
+          setIsScreenSharing(false);
+        }}
+        onError={(err) => {
+          // Filter out non-critical DataChannel errors
+          // These are warnings from LiveKit's internal WebRTC DataChannel and don't affect functionality
+          const errorMessage = err.message || err.toString();
+          const isDataChannelError = 
+            errorMessage.includes("DataChannel") || 
+            errorMessage.includes("dataChannel") ||
+            errorMessage.includes("reliable");
+          
+          if (isDataChannelError) {
+            // Log as warning instead of error - these are non-critical
+            console.warn("LiveKit DataChannel warning (non-critical):", err);
+            return; // Don't set as error state
+          }
+          
+          // For other errors, handle normally
+          setError(err);
+          console.error("LiveKit connection error:", err);
+          // LiveKitRoom will handle reconnection automatically
+        }}
+      >
+        <LiveKitMediaProviderInner
+          activeHuddle={activeHuddle}
+          updateMuteStatus={updateMuteStatus}
+          setLocalStream={setLocalStream}
+          setScreenStream={setScreenStream}
+          setIsScreenSharing={setIsScreenSharing}
+          setIsMuted={setIsMuted}
+          setIsVideoEnabled={setIsVideoEnabled}
+          setError={setError}
+          tokenLoading={tokenLoading}
+          error={error}
+          currentMemberId={currentMember?._id || null}
+        >
+          {children}
+        </LiveKitMediaProviderInner>
+      </LiveKitRoomWrapper>
+    );
+  }
+
+  // Fallback: provide context without LiveKit when not connected
+  // This happens when:
+  // - Huddle is not active
+  // - Token is still loading
+  // - Token fetch failed
   const value: HuddleMediaContextValue = {
     localStream,
     screenStream,
-    remoteStreams,
+    remoteStreams: new Map<Id<"members">, MediaStream>(),
+    remoteScreenShares: new Map<Id<"members">, MediaStream>(),
+    screenSharingMemberId:
+      isScreenSharing && currentMember?._id ? currentMember._id : null,
     isAudioEnabled,
     isVideoEnabled,
     isScreenSharing,
     isMuted,
-    isConnecting,
+    isConnecting: tokenLoading || (isHuddleActive && !token),
     toggleAudio,
     toggleVideo,
     toggleScreenShare,
     initializeMedia,
     cleanup,
-    isLoading,
-    error,
+    isLoading: tokenLoading,
+    error: tokenError || error,
+    participantsMuteStatus: new Map(), // Empty when not connected
   };
 
   return (
@@ -665,6 +1087,8 @@ export function useHuddleMedia() {
       localStream: null,
       screenStream: null,
       remoteStreams: new Map(),
+      remoteScreenShares: new Map(),
+      screenSharingMemberId: null,
       isAudioEnabled: false,
       isVideoEnabled: false,
       isScreenSharing: false,
@@ -677,6 +1101,7 @@ export function useHuddleMedia() {
       cleanup: () => {},
       isLoading: false,
       error: null,
+      participantsMuteStatus: new Map(), // Empty when not in provider
     };
   }
   return context;
