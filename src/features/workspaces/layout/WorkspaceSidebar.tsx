@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { getUserDisplayName } from "@/lib/user-utils";
+import { HuddleBar } from "@/features/huddle/components/HuddleBar";
 
 function ChannelItem({
   channel,
@@ -203,6 +204,9 @@ export function WorkspaceSidebar() {
             />
           ))}
       </WorkspaceSection>
+      <div className="mt-auto">
+        <HuddleBar />
+      </div>
     </div>
   );
 }
