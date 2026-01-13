@@ -1,12 +1,12 @@
 import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
+import { WebRTCSignal } from "@/lib/webrtc-signal-types";
 
 interface UseSendSignalProps {
   huddleId: Id<"huddles">;
   toMemberId: Id<"members">;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  signal: any; // WebRTC signal object
+  signal: WebRTCSignal;
 }
 
 export function useSendSignal() {

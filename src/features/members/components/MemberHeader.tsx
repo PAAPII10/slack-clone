@@ -6,8 +6,10 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { useMemberOnlineStatus } from "@/features/presence/api/use-presence";
 import { useHuddleState } from "@/features/huddle/store/use-huddle-state";
 import { useStartOrJoinHuddle } from "@/features/huddle/api/use-start-or-join-huddle";
+import { playHuddleSound } from "@/lib/huddle-sounds";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { Hint } from "@/components/Hint";
+import { useHuddleAudioSettings } from "@/features/huddle/hooks/use-huddle-audio-settings";
 
 interface MemberHeaderProps {
   memberName?: string;
@@ -27,6 +29,7 @@ export function MemberHeader({
   const [, setHuddleState] = useHuddleState();
   const workspaceId = useWorkspaceId();
   const { mutate: startOrJoinHuddle } = useStartOrJoinHuddle();
+  const { settings } = useHuddleAudioSettings();
 
   const handleStartHuddle = () => {
     if (!memberId || !workspaceId) return;
@@ -37,10 +40,13 @@ export function MemberHeader({
         workspaceId,
         sourceType: "dm",
         sourceId: memberId,
+        startMuted: settings.startMuted,
       },
       {
         onSuccess: (huddleId) => {
           console.log("Huddle started/joined successfully:", huddleId);
+          // Play join sound
+          playHuddleSound("join");
           setHuddleState((prev) => ({
             ...prev,
             currentHuddleId: huddleId,

@@ -149,6 +149,7 @@ const schema = defineSchema({
     joinedAt: v.number(),
     leftAt: v.optional(v.number()),
     role: v.union(v.literal("host"), v.literal("participant")),
+    isMuted: v.optional(v.boolean()), // Track whether participant is muted
   })
     .index("by_huddle_id", ["huddleId"])
     .index("by_member_id", ["memberId"])

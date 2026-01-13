@@ -14,6 +14,10 @@ import { useHuddleParticipants } from "../api/use-huddle-participants";
 import { useStartOrJoinHuddle } from "../api/use-start-or-join-huddle";
 import { useLeaveHuddle } from "../api/use-leave-huddle";
 import { useHuddleMedia } from "./HuddleMediaProvider";
+import { playHuddleSound } from "@/lib/huddle-sounds";
+import { useActiveSpeaker } from "../hooks/use-active-speaker";
+import { useHuddleAudioSettings } from "../hooks/use-huddle-audio-settings";
+import { useSettingsModal } from "@/store/use-settings-modal";
 import {
   Mic,
   MicOff,
@@ -26,6 +30,7 @@ import {
   Maximize2,
   Minimize2,
   X,
+  Volume2,
 } from "lucide-react";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { useState, useMemo, useRef, useEffect } from "react";
@@ -57,6 +62,8 @@ function HuddleDialogContent({
   const workspaceId = useWorkspaceId();
   const { data: currentMember } = useCurrentMember({ workspaceId });
   const [isMaximized, setIsMaximized] = useState(false);
+  const [, , openSettings] = useSettingsModal();
+  const { settings } = useHuddleAudioSettings();
   const { mutate: startOrJoinHuddle, isPending: isJoining } =
     useStartOrJoinHuddle();
   const { mutate: leaveHuddle } = useLeaveHuddle();
@@ -102,7 +109,8 @@ function HuddleDialogContent({
   });
 
   // Use currentHuddleId from state if available (for immediate updates after join)
-  const effectiveHuddleId = huddleState.currentHuddleId || activeHuddle?._id || null;
+  const effectiveHuddleId =
+    huddleState.currentHuddleId || activeHuddle?._id || null;
 
   // Get participants
   const { data: participants } = useHuddleParticipants({
@@ -110,7 +118,9 @@ function HuddleDialogContent({
   });
 
   // Check if huddle is actually active (from Convex or state)
-  const isHuddleActive = huddleState.currentHuddleId ? true : (activeHuddle?.isActive ?? false);
+  const isHuddleActive = huddleState.currentHuddleId
+    ? true
+    : activeHuddle?.isActive ?? false;
 
   // Get remote streams from media provider (WebRTC is managed there)
   const { remoteStreams, isConnecting } = useHuddleMedia();
@@ -125,6 +135,14 @@ function HuddleDialogContent({
   );
   const playingRefs = useRef<Map<Id<"members">, boolean>>(new Map());
 
+  // Active speaker detection
+  const activeSpeakerId = useActiveSpeaker({
+    isHuddleActive,
+    localStream,
+    remoteStreams,
+    currentMemberId: currentMember?._id || null,
+  });
+
   // Update local video element
   useEffect(() => {
     if (localVideoRef.current && localStream) {
@@ -138,65 +156,112 @@ function HuddleDialogContent({
       const videoElement = remoteVideoRefs.current.get(memberId);
       const audioElement = remoteAudioRefs.current.get(memberId);
       const isPlaying = playingRefs.current.get(memberId);
-      
+
       // Ensure audio tracks are enabled
       const audioTracks = stream.getAudioTracks();
-      audioTracks.forEach((track) => {
+      audioTracks.forEach((track: MediaStreamTrack) => {
         if (!track.enabled) {
           track.enabled = true;
         }
       });
-      
+
       if (videoElement) {
         // Only update srcObject if it's different to avoid interrupting playback
         if (videoElement.srcObject !== stream) {
           videoElement.srcObject = stream;
         }
-        
+
         // Ensure video element is not muted and can play audio
         videoElement.muted = false;
-        videoElement.volume = 1.0;
-        
+        videoElement.volume = settings.outputVolume;
+
+        // Set speaker output device (sinkId) for video element
+        if (settings.selectedSpeakerId && "setSinkId" in videoElement) {
+          (
+            videoElement as HTMLVideoElement & {
+              setSinkId: (id: string) => Promise<void>;
+            }
+          )
+            .setSinkId(settings.selectedSpeakerId)
+            .catch((err) => {
+              console.warn(
+                `Failed to set speaker device for video ${memberId}:`,
+                err
+              );
+            });
+        }
+
         // Only try to play if not already playing and element is ready
         if (!isPlaying && videoElement.readyState >= 2) {
           playingRefs.current.set(memberId, true);
-          videoElement.play().then(() => {
-            console.log(`Playing video/audio for ${memberId}`);
-          }).catch((err) => {
-            playingRefs.current.set(memberId, false);
-            // Only log if it's not an abort error (which is expected when stream changes)
-            if (!err.message.includes("interrupted") && !err.message.includes("AbortError")) {
-              console.error(`Error playing remote stream for ${memberId}:`, err);
-            }
-          });
+          videoElement
+            .play()
+            .then(() => {
+              console.log(`Playing video/audio for ${memberId}`);
+            })
+            .catch((err) => {
+              playingRefs.current.set(memberId, false);
+              // Only log if it's not an abort error (which is expected when stream changes)
+              if (
+                !err.message.includes("interrupted") &&
+                !err.message.includes("AbortError")
+              ) {
+                console.error(
+                  `Error playing remote stream for ${memberId}:`,
+                  err
+                );
+              }
+            });
         }
       }
-      
+
       // Handle audio-only streams with audio element
       if (audioElement && stream.getVideoTracks().length === 0) {
         // Only update srcObject if it's different
         if (audioElement.srcObject !== stream) {
           audioElement.srcObject = stream;
         }
-        
+
         audioElement.muted = false;
-        audioElement.volume = 1.0;
-        
+        audioElement.volume = settings.outputVolume;
+
+        // Set speaker output device (sinkId) for audio element
+        if (settings.selectedSpeakerId && "setSinkId" in audioElement) {
+          (
+            audioElement as HTMLAudioElement & {
+              setSinkId: (id: string) => Promise<void>;
+            }
+          )
+            .setSinkId(settings.selectedSpeakerId)
+            .catch((err) => {
+              console.warn(
+                `Failed to set speaker device for audio ${memberId}:`,
+                err
+              );
+            });
+        }
+
         // Only try to play if not already playing
         if (!isPlaying && audioElement.readyState >= 2) {
           playingRefs.current.set(memberId, true);
-          audioElement.play().then(() => {
-            console.log(`Playing audio for ${memberId}`);
-          }).catch((err) => {
-            playingRefs.current.set(memberId, false);
-            if (!err.message.includes("interrupted") && !err.message.includes("AbortError")) {
-              console.error(`Error playing audio for ${memberId}:`, err);
-            }
-          });
+          audioElement
+            .play()
+            .then(() => {
+              console.log(`Playing audio for ${memberId}`);
+            })
+            .catch((err) => {
+              playingRefs.current.set(memberId, false);
+              if (
+                !err.message.includes("interrupted") &&
+                !err.message.includes("AbortError")
+              ) {
+                console.error(`Error playing audio for ${memberId}:`, err);
+              }
+            });
         }
       }
     });
-    
+
     // Clean up playing refs for removed streams
     const currentMemberIds = new Set(remoteStreams.keys());
     playingRefs.current.forEach((_, memberId) => {
@@ -204,7 +269,7 @@ function HuddleDialogContent({
         playingRefs.current.delete(memberId);
       }
     });
-  }, [remoteStreams]);
+  }, [remoteStreams, settings.outputVolume, settings.selectedSpeakerId]);
 
   // Determine huddle title
   const huddleTitle =
@@ -220,14 +285,22 @@ function HuddleDialogContent({
     return participants.map((p) => ({
       id: p.memberId,
       name: getUserDisplayName(p.user),
+      image: (p.user as { image?: string | null })?.image || undefined,
       isYou: p.memberId === currentMember._id,
       role: p.role,
+      isMuted: p.isMuted,
     }));
   }, [participants, currentMember]);
 
   // Auto-join when dialog opens if huddle source is set but not active
   useEffect(() => {
-    if (open && !isHuddleActive && huddleState.huddleSource && sourceId && workspaceId) {
+    if (
+      open &&
+      !isHuddleActive &&
+      huddleState.huddleSource &&
+      sourceId &&
+      workspaceId
+    ) {
       // Auto-join the huddle when dialog opens
       startOrJoinHuddle(
         {
@@ -238,6 +311,8 @@ function HuddleDialogContent({
         {
           onSuccess: (huddleId) => {
             console.log("Auto-joined huddle:", huddleId);
+            // Play join sound
+            playHuddleSound("join");
             setHuddleState((prev) => ({
               ...prev,
               currentHuddleId: huddleId,
@@ -251,7 +326,15 @@ function HuddleDialogContent({
         }
       );
     }
-  }, [open, isHuddleActive, huddleState.huddleSource, sourceId, workspaceId, startOrJoinHuddle, setHuddleState]);
+  }, [
+    open,
+    isHuddleActive,
+    huddleState.huddleSource,
+    sourceId,
+    workspaceId,
+    startOrJoinHuddle,
+    setHuddleState,
+  ]);
 
   const handleJoin = () => {
     if (!workspaceId || !huddleState.huddleSource || !sourceId) return;
@@ -265,6 +348,8 @@ function HuddleDialogContent({
       {
         onSuccess: (huddleId) => {
           console.log("Huddle started/joined successfully:", huddleId);
+          // Play join sound
+          playHuddleSound("join");
           // Update state immediately with huddleId to trigger UI update
           setHuddleState((prev) => ({
             ...prev,
@@ -282,6 +367,8 @@ function HuddleDialogContent({
 
   const handleLeave = () => {
     cleanup();
+    // Play hangup sound
+    playHuddleSound("hangup");
     const huddleIdToLeave = effectiveHuddleId;
     if (huddleIdToLeave) {
       leaveHuddle(huddleIdToLeave, {
@@ -291,6 +378,8 @@ function HuddleDialogContent({
             isHuddleActive: false,
             isHuddleOpen: false,
             currentHuddleId: null,
+            huddleSource: null,
+            huddleSourceId: null,
           }));
         },
       });
@@ -301,6 +390,8 @@ function HuddleDialogContent({
         isHuddleActive: false,
         isHuddleOpen: false,
         currentHuddleId: null,
+        huddleSource: null,
+        huddleSourceId: null,
       }));
     }
   };
@@ -322,7 +413,7 @@ function HuddleDialogContent({
   };
 
   const handleSettings = () => {
-    // TODO (PHASE 2): Open huddle settings
+    openSettings("audio-video");
   };
 
   // Show join screen if not active
@@ -332,6 +423,10 @@ function HuddleDialogContent({
         <DialogContent
           className="max-w-md p-0 overflow-hidden"
           showCloseButton={false}
+          onInteractOutside={(e) => {
+            // Prevent closing when clicking outside
+            e.preventDefault();
+          }}
         >
           <DialogTitle className="sr-only">
             Huddle with {huddleTitle}
@@ -421,6 +516,10 @@ function HuddleDialogContent({
           width: isMaximized ? "95vw" : "100%",
         }}
         showCloseButton={false}
+        onInteractOutside={(e) => {
+          // Prevent closing when clicking outside - only allow minimize button
+          e.preventDefault();
+        }}
       >
         <DialogTitle className="sr-only">Huddle with {huddleTitle}</DialogTitle>
         {/* Thin Header */}
@@ -460,7 +559,7 @@ function HuddleDialogContent({
         </div>
 
         {/* Participant View Area - Side by Side */}
-        <div className="flex-1 bg-purple-50 flex gap-4 p-4 overflow-hidden">
+        <div className="flex-1 flex gap-4 p-4 overflow-hidden">
           {displayParticipants.length > 0 ? (
             displayParticipants.map((participant) => {
               const isYou = participant.isYou;
@@ -468,25 +567,22 @@ function HuddleDialogContent({
                 ? localStream
                 : remoteStreams.get(participant.id);
               const hasVideo =
-                stream?.getVideoTracks().some((t) => t.enabled) ?? false;
+                stream
+                  ?.getVideoTracks()
+                  .some((t: MediaStreamTrack) => t.enabled) ?? false;
               const hasAudio =
-                stream?.getAudioTracks().some((t) => t.enabled) ?? false;
-              
-              // Debug logging for remote streams
-              if (!isYou && stream) {
-                console.log(`Participant ${participant.id} stream:`, {
-                  hasVideo,
-                  hasAudio,
-                  audioTracks: stream.getAudioTracks().length,
-                  videoTracks: stream.getVideoTracks().length,
-                });
-              }
+                stream
+                  ?.getAudioTracks()
+                  .some((t: MediaStreamTrack) => t.enabled) ?? false;
+
+              // Check if this participant is the active speaker
+              const isActiveSpeaker = activeSpeakerId === participant.id;
 
               return (
                 <div
                   key={participant.id}
-                  className={`flex-1 rounded-xl bg-purple-100 relative flex flex-col items-center justify-center overflow-hidden ${
-                    isYou ? "ring-2 ring-[#5E2C5F]" : ""
+                  className={`flex-1 relative flex flex-col items-center justify-center overflow-hidden rounded-md ${
+                    isActiveSpeaker ? "ring-2 ring-[#5E2C5F]" : ""
                   }`}
                 >
                   {hasVideo ? (
@@ -514,13 +610,21 @@ function HuddleDialogContent({
                       onLoadedMetadata={(e) => {
                         // Only play when metadata is loaded and element is ready
                         if (!isYou && e.currentTarget.readyState >= 2) {
-                          const isPlaying = playingRefs.current.get(participant.id);
+                          const isPlaying = playingRefs.current.get(
+                            participant.id
+                          );
                           if (!isPlaying) {
                             playingRefs.current.set(participant.id, true);
                             e.currentTarget.play().catch((err) => {
                               playingRefs.current.set(participant.id, false);
-                              if (!err.message.includes("interrupted") && !err.message.includes("AbortError")) {
-                                console.error(`Error playing video for ${participant.id}:`, err);
+                              if (
+                                !err.message.includes("interrupted") &&
+                                !err.message.includes("AbortError")
+                              ) {
+                                console.error(
+                                  `Error playing video for ${participant.id}:`,
+                                  err
+                                );
                               }
                             });
                           }
@@ -549,10 +653,14 @@ function HuddleDialogContent({
                           playsInline
                         />
                       )}
-                      <div className="flex flex-col items-center">
-                        <Avatar className="size-32 border-4 border-white shadow-2xl">
-                          <AvatarImage src={undefined} />
-                          <AvatarFallback className="text-4xl font-bold bg-[#5E2C5F] text-white">
+                      {/* Full-size avatar that fills the entire area */}
+                      <div className="absolute inset-0 w-full h-full">
+                        <Avatar className="w-full h-full rounded-none">
+                          <AvatarImage
+                            src={participant.image || undefined}
+                            className="w-full h-full object-cover"
+                          />
+                          <AvatarFallback className="w-full h-full text-8xl font-bold bg-sky-500 text-white flex items-center justify-center rounded-none">
                             {participant.name.charAt(0).toUpperCase()}
                           </AvatarFallback>
                         </Avatar>
@@ -566,13 +674,20 @@ function HuddleDialogContent({
                       {isYou ? "You" : participant.name}
                       {participant.role === "host" && " (Host)"}
                     </span>
-                    {isYou && !isMuted && (
-                      <span className="text-lg" title="Microphone active">
-                        🔊
-                      </span>
-                    )}
-                    {isYou && isMuted && (
-                      <MicOff className="size-4 text-white" />
+                    {isYou ? (
+                      <>
+                        {!isMuted && <Volume2 className="size-4 text-white" />}
+                        {isMuted && <MicOff className="size-4 text-white" />}
+                      </>
+                    ) : (
+                      <>
+                        {participant.isMuted && (
+                          <MicOff className="size-4 text-white" />
+                        )}
+                        {!participant.isMuted && (
+                          <Volume2 className="size-4 text-white" />
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -613,13 +728,14 @@ function HuddleDialogContent({
           <Button
             variant="ghost"
             size="icon"
-            className={`size-12 rounded-full transition-all ${
+            className={`size-12 rounded-full transition-all opacity-50 cursor-not-allowed ${
               !isVideoEnabled
-                ? "bg-gray-500/20 hover:bg-gray-500/30 text-white"
-                : "bg-white/10 hover:bg-white/20 text-white"
+                ? "bg-gray-500/20 text-white"
+                : "bg-white/10 text-white"
             }`}
+            title="Video disabled"
+            disabled
             onClick={handleToggleVideo}
-            title={!isVideoEnabled ? "Turn on video" : "Turn off video"}
           >
             {!isVideoEnabled ? (
               <VideoOff className="size-5" />
@@ -631,13 +747,14 @@ function HuddleDialogContent({
           <Button
             variant="ghost"
             size="icon"
-            className={`size-12 rounded-full transition-all ${
+            className={`size-12 rounded-full transition-all opacity-50 cursor-not-allowed ${
               isScreenSharing
-                ? "bg-green-500/20 hover:bg-green-500/30 text-white"
-                : "bg-white/10 hover:bg-white/20 text-white"
+                ? "bg-green-500/20 text-white"
+                : "bg-white/10 text-white"
             }`}
+            title="Screen sharing disabled"
+            disabled
             onClick={handleScreenShare}
-            title={isScreenSharing ? "Stop sharing" : "Share screen"}
           >
             <Monitor className="size-5" />
           </Button>
@@ -709,7 +826,8 @@ export function HuddleDialog({ open, onOpenChange }: HuddleDialogProps) {
   });
 
   // Use currentHuddleId from state if available (for immediate updates after join)
-  const effectiveHuddleId = huddleState.currentHuddleId || activeHuddle?._id || null;
+  const effectiveHuddleId =
+    huddleState.currentHuddleId || activeHuddle?._id || null;
 
   // Get participants
   const { data: participants } = useHuddleParticipants({
@@ -730,13 +848,17 @@ export function HuddleDialog({ open, onOpenChange }: HuddleDialogProps) {
     return participants.map((p) => ({
       id: p.memberId,
       name: getUserDisplayName(p.user),
+      image: (p.user as { image?: string | null })?.image || undefined,
       isYou: p.memberId === currentMember._id,
       role: p.role,
+      isMuted: p.isMuted,
     }));
   }, [participants, currentMember]);
 
   // Check if huddle is actually active (from Convex or state)
-  const isHuddleActive = huddleState.currentHuddleId ? true : (activeHuddle?.isActive ?? false);
+  const isHuddleActive = huddleState.currentHuddleId
+    ? true
+    : activeHuddle?.isActive ?? false;
 
   // Debug logging
   useEffect(() => {
@@ -816,6 +938,10 @@ export function HuddleDialog({ open, onOpenChange }: HuddleDialogProps) {
         <DialogContent
           className="max-w-md p-0 overflow-hidden"
           showCloseButton={false}
+          onInteractOutside={(e) => {
+            // Prevent closing when clicking outside
+            e.preventDefault();
+          }}
         >
           <DialogTitle className="sr-only">
             Huddle with {huddleTitle}

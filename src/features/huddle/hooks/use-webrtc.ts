@@ -42,7 +42,6 @@ export function useWebRTC({
   const { sendSignal } = useSendSignal();
 
   const peersRef = useRef<Map<Id<"members">, PeerConnection>>(new Map());
-  const processedSignalsRef = useRef<Set<string>>(new Set());
   const [remoteStreams, setRemoteStreams] = useState<
     Map<Id<"members">, MediaStream>
   >(new Map());
@@ -67,13 +66,15 @@ export function useWebRTC({
     ) => {
       if (!huddleId || !currentMember) return null;
 
-      // Log local stream info
+      // Ensure local stream audio tracks are enabled before creating peer
       if (localStream) {
+        localStream.getAudioTracks().forEach((track) => {
+          track.enabled = true;
+        });
         console.log(`Creating peer for ${peerMemberId} with local stream:`, {
           audioTracks: localStream.getAudioTracks().length,
           videoTracks: localStream.getVideoTracks().length,
           audioEnabled: localStream.getAudioTracks().filter(t => t.enabled).length,
-          videoEnabled: localStream.getVideoTracks().filter(t => t.enabled).length,
         });
       }
 
@@ -100,20 +101,6 @@ export function useWebRTC({
 
       // Handle stream events - store remote stream
       peer.on("stream", (stream) => {
-        console.log(`Received remote stream from ${peerMemberId}:`, {
-          audioTracks: stream.getAudioTracks().length,
-          videoTracks: stream.getVideoTracks().length,
-          audioTracksEnabled: stream.getAudioTracks().filter(t => t.enabled).length,
-        });
-        
-        // Ensure audio tracks are enabled
-        stream.getAudioTracks().forEach((track) => {
-          if (!track.enabled) {
-            track.enabled = true;
-            console.log(`Enabled audio track from ${peerMemberId}`);
-          }
-        });
-        
         setRemoteStreams((prev) => {
           const next = new Map(prev);
           next.set(peerMemberId, stream);
@@ -128,14 +115,20 @@ export function useWebRTC({
       });
 
       peer.on("error", (err) => {
-        // Filter out "wrong state" errors as they're often recoverable
-        if (err instanceof Error) {
-          if (err.message.includes("wrong state") || err.message.includes("stable")) {
-            console.warn(`Peer ${peerMemberId} state warning (may recover):`, err.message);
-            return;
-          }
-        }
         console.error(`Peer error with ${peerMemberId}:`, err);
+        
+        // Handle abrupt disconnections (e.g., page reload, browser close)
+        if (err.message?.includes("User-Initiated Abort") || 
+            err.message?.includes("Close called")) {
+          console.log(`Peer ${peerMemberId} disconnected abruptly, cleaning up`);
+          // Don't log as error - this is expected behavior
+          peersRef.current.delete(peerMemberId);
+          setRemoteStreams((prev) => {
+            const next = new Map(prev);
+            next.delete(peerMemberId);
+            return next;
+          });
+        }
       });
 
       peer.on("close", () => {
@@ -155,135 +148,85 @@ export function useWebRTC({
   // Apply incoming signal to the correct peer
   const applySignal = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (signal: any, fromMemberId: Id<"members">, toMemberId: Id<"members">, signalId?: string) => {
+    (signal: any, fromMemberId: Id<"members">, toMemberId: Id<"members">) => {
       if (!currentMember || toMemberId !== currentMember._id) return;
-
-      // Create unique signal ID to prevent duplicate processing
-      const uniqueSignalId = signalId || `${fromMemberId}-${JSON.stringify(signal).slice(0, 50)}`;
-      if (processedSignalsRef.current.has(uniqueSignalId)) {
-        return; // Already processed this signal
-      }
 
       const peerConnection = peersRef.current.get(fromMemberId);
       if (!peerConnection) {
         // Peer doesn't exist yet - might be created later, or signal is stale
-        console.log(`Peer connection not found for ${fromMemberId}, signal may be stale`);
         return;
       }
 
       // Check if peer is destroyed
       const peerWithPc = peerConnection.peer as PeerWithPc;
       if (!peerWithPc._pc) {
+        // Peer has no RTCPeerConnection, it's likely destroyed
         console.log(`Peer ${fromMemberId} has no RTCPeerConnection, ignoring signal`);
         return;
       }
 
       const pc = peerWithPc._pc;
       // Check connection state - skip if disconnected, failed, or closed
-      const connectionState = pc.connectionState;
-      if (connectionState === "disconnected" || connectionState === "failed" || connectionState === "closed") {
-        console.log(`Peer ${fromMemberId} connection is ${connectionState}, ignoring signal`);
+      if (pc.connectionState === "disconnected" || pc.connectionState === "failed" || pc.connectionState === "closed") {
+        console.log(`Peer ${fromMemberId} connection is ${pc.connectionState}, ignoring signal`);
+        return;
+      }
+
+      // Check signaling state to avoid applying signals in wrong state
+      const signalingState = pc.signalingState;
+      
+      // Detect signal type
+      const isOffer = signal.type === "offer";
+      const isAnswer = signal.type === "answer";
+      
+      // Validate signal against current state
+      if (isAnswer && signalingState !== "have-local-offer") {
+        // Received answer but not waiting for one - likely stale signal
+        console.log(`Ignoring answer from ${fromMemberId}: signaling state is ${signalingState}, expected have-local-offer`);
+        return;
+      }
+      
+      if (isOffer && signalingState !== "stable") {
+        // Received offer but not in stable state - connection might be negotiating
+        console.log(`Ignoring offer from ${fromMemberId}: signaling state is ${signalingState}, expected stable`);
         return;
       }
 
       try {
-        // Mark signal as processed before applying
-        processedSignalsRef.current.add(uniqueSignalId);
         peerConnection.peer.signal(signal);
       } catch (error) {
-        // Remove from processed set if it failed
-        processedSignalsRef.current.delete(uniqueSignalId);
-        
-        // Check if error is because peer is destroyed or in wrong state
-        if (error instanceof Error) {
-          if (error.message.includes("destroyed")) {
-            console.log(`Peer ${fromMemberId} was destroyed, removing from map`);
-            peersRef.current.delete(fromMemberId);
-            setRemoteStreams((prev) => {
-              const next = new Map(prev);
-              next.delete(fromMemberId);
-              return next;
-            });
-          } else if (error.message.includes("wrong state") || error.message.includes("stable")) {
-            // Peer is in wrong state - might be a race condition
-            // Log but don't fail - the peer might recover
-            console.warn(`Peer ${fromMemberId} in wrong state (${pc.signalingState}), signal may be out of order:`, error.message);
-          } else {
-            console.error(`Error applying signal from ${fromMemberId}:`, error);
-          }
+        // Check if error is because peer is destroyed
+        if (error instanceof Error && error.message.includes("destroyed")) {
+          console.log(`Peer ${fromMemberId} was destroyed, removing from map`);
+          peersRef.current.delete(fromMemberId);
+          setRemoteStreams((prev) => {
+            const next = new Map(prev);
+            next.delete(fromMemberId);
+            return next;
+          });
+        } else {
+          console.error(`Error applying signal from ${fromMemberId}:`, error);
         }
       }
     },
     [currentMember]
   );
 
-  // Initialize peer connections when participants change
+  // Initialize peer connections when participants change or local stream becomes available
   useEffect(() => {
-    if (!enabled || !huddleId || !currentMember || !participants) {
-      // Cleanup all peers if disabled
-      if (!enabled) {
-        peersRef.current.forEach((peerConnection) => {
-          try {
-            peerConnection.peer.destroy();
-          } catch {
-            // Peer might already be destroyed
-            console.log("Peer already destroyed during cleanup");
-          }
-        });
-        peersRef.current.clear();
-        processedSignalsRef.current.clear();
-        // Use setTimeout to avoid setState in effect
-        setTimeout(() => {
-          setRemoteStreams(new Map());
-          setPeerCount(0);
-        }, 0);
-      }
-      return;
-    }
+    if (!enabled || !huddleId || !currentMember || !participants) return;
 
     const currentMemberId = currentMember._id;
     const activeParticipants = participants.filter(
       (p) => p.memberId !== currentMemberId
     );
 
-    // Remove peer connections for participants who left
-    const activeMemberIds = new Set(activeParticipants.map((p) => p.memberId));
-    peersRef.current.forEach((peerConnection, memberId) => {
-      if (!activeMemberIds.has(memberId)) {
-        try {
-          peerConnection.peer.destroy();
-        } catch {
-          // Peer might already be destroyed
-          console.log(`Peer ${memberId} already destroyed`);
-        }
-        peersRef.current.delete(memberId);
-        setRemoteStreams((prev) => {
-          const next = new Map(prev);
-          next.delete(memberId);
-          return next;
-        });
-        setPeerCount(peersRef.current.size);
-      }
-    });
-
     // Create peer connections for new participants
     activeParticipants.forEach((participant) => {
       const peerMemberId = participant.memberId;
 
       // Skip if peer already exists
-      if (peersRef.current.has(peerMemberId)) {
-        // Check if existing peer is still valid
-        const existingPeer = peersRef.current.get(peerMemberId);
-        if (existingPeer) {
-          const peerWithPc = existingPeer.peer as PeerWithPc;
-          if (peerWithPc._pc && peerWithPc._pc.connectionState !== "closed") {
-            return; // Peer is still valid
-          } else {
-            // Peer is destroyed, remove it
-            peersRef.current.delete(peerMemberId);
-          }
-        }
-      }
+      if (peersRef.current.has(peerMemberId)) return;
 
       const initiator = isInitiator(currentMemberId, peerMemberId);
       const peerConnection = createPeer(
@@ -298,26 +241,41 @@ export function useWebRTC({
         setPeerCount(peersRef.current.size);
       }
     });
-  }, [enabled, huddleId, currentMember, participants, isInitiator, createPeer]);
+
+    // Remove peer connections for participants who left
+    const activeMemberIds = new Set(activeParticipants.map((p) => p.memberId));
+    peersRef.current.forEach((peerConnection, memberId) => {
+      if (!activeMemberIds.has(memberId)) {
+        peerConnection.peer.destroy();
+        peersRef.current.delete(memberId);
+        setRemoteStreams((prev) => {
+          const next = new Map(prev);
+          next.delete(memberId);
+          return next;
+        });
+        setPeerCount(peersRef.current.size);
+      }
+    });
+  }, [enabled, huddleId, currentMember, participants, isInitiator, createPeer, localStream]);
 
   // Apply incoming signals
   useEffect(() => {
     if (!signals || !currentMember || !enabled) return;
 
-    // Process signals in order, but skip if peer doesn't exist yet
     // Use a small delay to ensure peers are created before signals are applied
     const timeoutId = setTimeout(() => {
       signals.forEach((signalData) => {
         // Only apply signals that are for the current member
         if (signalData.toMemberId === currentMember._id) {
-          // Use signal _id as unique identifier
-          const signalId = `${signalData._id}-${signalData.fromMemberId}`;
-          applySignal(
-            signalData.signal,
-            signalData.fromMemberId,
-            signalData.toMemberId,
-            signalId
-          );
+          // Check if peer exists before applying signal
+          const peerConnection = peersRef.current.get(signalData.fromMemberId);
+          if (peerConnection) {
+            applySignal(
+              signalData.signal,
+              signalData.fromMemberId,
+              signalData.toMemberId
+            );
+          }
         }
       });
     }, 100); // Small delay to ensure peer is ready
@@ -369,17 +327,11 @@ export function useWebRTC({
   // Cleanup on unmount
   useEffect(() => {
     const peers = peersRef.current;
-    const processedSignals = processedSignalsRef.current;
     return () => {
       peers.forEach((peerConnection) => {
-        try {
-          peerConnection.peer.destroy();
-        } catch {
-          // Peer might already be destroyed
-        }
+        peerConnection.peer.destroy();
       });
       peers.clear();
-      processedSignals.clear();
       setRemoteStreams(new Map());
       setPeerCount(0);
     };

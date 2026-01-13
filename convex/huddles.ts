@@ -248,6 +248,7 @@ export const startOrJoinHuddle = mutation({
     workspaceId: v.id("workspaces"),
     sourceType: v.union(v.literal("channel"), v.literal("dm")),
     sourceId: v.union(v.id("channels"), v.id("conversations"), v.id("members")),
+    startMuted: v.optional(v.boolean()), // Whether to join with mic muted
   },
   handler: async (ctx, args) => {
     const memberId = await getCurrentMember(ctx, args.workspaceId);
@@ -349,6 +350,7 @@ export const startOrJoinHuddle = mutation({
           await ctx.db.patch(existingParticipant._id, {
             leftAt: undefined,
             joinedAt: Date.now(),
+            isMuted: args.startMuted ?? false,
           });
         }
         return existingHuddle._id;
@@ -360,6 +362,7 @@ export const startOrJoinHuddle = mutation({
         memberId,
         joinedAt: Date.now(),
         role: "participant",
+        isMuted: args.startMuted ?? false,
       });
 
       return existingHuddle._id;
@@ -384,6 +387,7 @@ export const startOrJoinHuddle = mutation({
       memberId,
       joinedAt: Date.now(),
       role: "host",
+      isMuted: args.startMuted ?? false,
     });
 
     return huddleId;
@@ -396,6 +400,7 @@ export const startOrJoinHuddle = mutation({
 export const joinHuddle = mutation({
   args: {
     huddleId: v.id("huddles"),
+    startMuted: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const huddle = await ctx.db.get(args.huddleId);
@@ -443,6 +448,7 @@ export const joinHuddle = mutation({
         await ctx.db.patch(existingParticipant._id, {
           leftAt: undefined,
           joinedAt: Date.now(),
+          isMuted: args.startMuted ?? false,
         });
       }
       // Already a participant
@@ -455,9 +461,48 @@ export const joinHuddle = mutation({
       memberId,
       joinedAt: Date.now(),
       role: "participant",
+      isMuted: args.startMuted ?? false,
     });
 
     return args.huddleId;
+  },
+});
+
+/**
+ * Update participant mute status
+ */
+export const updateMuteStatus = mutation({
+  args: {
+    huddleId: v.id("huddles"),
+    isMuted: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const huddle = await ctx.db.get(args.huddleId);
+    if (!huddle || !huddle.isActive) {
+      throw new Error("Huddle not found or not active");
+    }
+
+    const memberId = await getCurrentMember(ctx, huddle.workspaceId);
+    if (!memberId) {
+      throw new Error("Unauthorized");
+    }
+
+    // Find participant record
+    const participant = await ctx.db
+      .query("huddleParticipants")
+      .withIndex("by_huddle_id_member_id", (q) =>
+        q.eq("huddleId", args.huddleId).eq("memberId", memberId)
+      )
+      .unique();
+
+    if (!participant || participant.leftAt) {
+      throw new Error("Not an active participant");
+    }
+
+    // Update mute status
+    await ctx.db.patch(participant._id, {
+      isMuted: args.isMuted,
+    });
   },
 });
 
@@ -661,6 +706,7 @@ async function populateUser(ctx: QueryCtx, userId: Id<"users">) {
     ...user,
     displayName: userProfile?.displayName,
     fullName: userProfile?.fullName,
+    image: user.image, // Include image field
   };
 }
 
@@ -687,11 +733,15 @@ export const getHuddleParticipants = query({
           return null;
         }
 
+        // Get full participant record to include mute status
+        const fullParticipant = await ctx.db.get(p._id);
+        
         return {
           _id: p._id,
           memberId: p.memberId,
           role: p.role,
           joinedAt: p.joinedAt,
+          isMuted: fullParticipant?.isMuted ?? false,
           user,
         };
       })
@@ -702,11 +752,13 @@ export const getHuddleParticipants = query({
       memberId: Id<"members">;
       role: "host" | "participant";
       joinedAt: number;
+      isMuted: boolean;
       user: {
         _id: Id<"users">;
         name: string;
         displayName?: string | null;
         fullName?: string | null;
+        image?: string | null;
       };
     }>;
   },
@@ -740,12 +792,25 @@ export const getMyActiveHuddle = query({
         huddle.isActive &&
         huddle.workspaceId === args.workspaceId
       ) {
+        // For DM huddles, get the other member's ID
+        let otherMemberId: Id<"members"> | undefined;
+        if (huddle.sourceType === "dm" && huddle.conversationId) {
+          const conversation = await ctx.db.get(huddle.conversationId);
+          if (conversation) {
+            // Get the other member (not the current member)
+            otherMemberId = conversation.memberOneId === memberId
+              ? conversation.memberTwoId
+              : conversation.memberOneId;
+          }
+        }
+
         return {
           _id: huddle._id,
           workspaceId: huddle.workspaceId,
           sourceType: huddle.sourceType,
           channelId: huddle.channelId,
           conversationId: huddle.conversationId,
+          otherMemberId, // For DM huddles
           createdBy: huddle.createdBy,
           isActive: huddle.isActive,
           createdAt: huddle.createdAt,

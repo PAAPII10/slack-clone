@@ -8,7 +8,9 @@ import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { useCurrentMember } from "@/features/members/api/use-current-member";
 import { useGetSoundPreferences } from "@/features/userPreferences/api/use-get-sound-preferences";
 import { playNotificationSound } from "@/lib/sound-manager";
+import { playHuddleSound } from "@/lib/huddle-sounds";
 import { useHuddleState } from "../store/use-huddle-state";
+import { SoundPreferences } from "@/hooks/use-sound-preferences";
 
 /**
  * Hook to monitor huddles and send notifications when:
@@ -38,7 +40,15 @@ export function useHuddleNotifications() {
   );
 
   useEffect(() => {
-    if (!workspaceId || !currentMember || !soundPrefs || !allActiveHuddles) return;
+    if (!workspaceId || !currentMember || !allActiveHuddles) return;
+    
+    // Use default sound preferences if not loaded yet
+    const defaultPrefs: Partial<SoundPreferences> = { 
+      enabled: true, 
+      volume: 0.7,
+      browserNotificationsEnabled: false,
+    };
+    const effectiveSoundPrefs: SoundPreferences = soundPrefs || defaultPrefs as SoundPreferences;
 
     const currentHuddleIds = new Set(
       allActiveHuddles.map((h) => h._id)
@@ -60,14 +70,23 @@ export function useHuddleNotifications() {
       // Mark as notified
       notifiedHuddlesRef.current.add(huddle._id);
 
-      // Play sound notification
-      if (soundPrefs.enabled) {
-        playNotificationSound(soundPrefs.soundType, soundPrefs.volume);
+      // Play incoming call sound for huddles
+      if (effectiveSoundPrefs.enabled) {
+        console.log("[HuddleNotifications] Playing incoming call sound", {
+          enabled: effectiveSoundPrefs.enabled,
+          volume: effectiveSoundPrefs.volume,
+          huddleId: huddle._id,
+        });
+        playHuddleSound("incoming_call", effectiveSoundPrefs.volume);
+      } else {
+        console.log("[HuddleNotifications] Sound disabled, skipping incoming call sound", {
+          enabled: effectiveSoundPrefs.enabled,
+        });
       }
 
       // Show browser notification
       if (
-        soundPrefs.browserNotificationsEnabled &&
+        effectiveSoundPrefs.browserNotificationsEnabled &&
         typeof window !== "undefined" &&
         "Notification" in window
       ) {

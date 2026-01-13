@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useHuddleState } from "../store/use-huddle-state";
 import { HuddleDialog } from "./HuddleDialog";
 import { useCurrentMember } from "@/features/members/api/use-current-member";
@@ -11,7 +12,13 @@ import { getUserDisplayName } from "@/lib/user-utils";
 import { useActiveHuddle } from "../api/use-active-huddle";
 import { useHuddleParticipants } from "../api/use-huddle-participants";
 import { useLeaveHuddle } from "../api/use-leave-huddle";
+import { useStartOrJoinHuddle } from "../api/use-start-or-join-huddle";
 import { HuddleMediaProvider, useHuddleMedia } from "./HuddleMediaProvider";
+import { playHuddleSound } from "@/lib/huddle-sounds";
+import { useActiveSpeaker } from "../hooks/use-active-speaker";
+import { useHuddleAudioSettings } from "../hooks/use-huddle-audio-settings";
+import { useSettingsModal } from "@/store/use-settings-modal";
+import { useAutoReconnectHuddle } from "../hooks/use-auto-reconnect-huddle";
 import {
   Headphones,
   Minimize2,
@@ -21,12 +28,13 @@ import {
   Video,
   VideoOff,
   Monitor,
-  MoreVertical,
   Music,
   ChevronDown,
   Square,
   UserPlus,
   PhoneOff,
+  Settings,
+  Phone,
 } from "lucide-react";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { useMemo, useEffect, useRef } from "react";
@@ -49,6 +57,23 @@ function HuddleBarContent() {
   const workspaceId = useWorkspaceId();
   const { data: currentMember } = useCurrentMember({ workspaceId });
   const { mutate: leaveHuddle } = useLeaveHuddle();
+  const [, , openSettings] = useSettingsModal();
+  const { settings } = useHuddleAudioSettings();
+  const { mutate: startOrJoinHuddle } = useStartOrJoinHuddle();
+
+  // Check for active huddle that we're not connected to (after reload)
+  const disconnectedHuddle = useAutoReconnectHuddle();
+
+  // Debug: Log disconnected huddle state
+  useEffect(() => {
+    console.log("🔄 HuddleBar state:", {
+      disconnectedHuddle,
+      disconnectedHuddleId: disconnectedHuddle?._id,
+      currentHuddleId: huddleState.currentHuddleId,
+      shouldShowBanner: !!disconnectedHuddle && !huddleState.currentHuddleId,
+      hasDisconnectedHuddle: !!disconnectedHuddle,
+    });
+  }, [disconnectedHuddle, huddleState.currentHuddleId]);
 
   // Media controls
   const {
@@ -88,7 +113,8 @@ function HuddleBarContent() {
   });
 
   // Use currentHuddleId from state if available (for immediate updates after join)
-  const effectiveHuddleId = huddleState.currentHuddleId || activeHuddle?._id || null;
+  const effectiveHuddleId =
+    huddleState.currentHuddleId || activeHuddle?._id || null;
 
   // Get participants
   const { data: participants } = useHuddleParticipants({
@@ -104,13 +130,25 @@ function HuddleBarContent() {
       : "Huddle";
 
   // Check if huddle is actually active (from Convex or state)
-  const isHuddleActive = huddleState.currentHuddleId ? true : (activeHuddle?.isActive ?? false);
+  const isHuddleActive = huddleState.currentHuddleId
+    ? true
+    : activeHuddle?.isActive ?? false;
 
   // Get remote streams from media provider (WebRTC is managed there)
-  const { remoteStreams } = useHuddleMedia();
+  const { remoteStreams, localStream } = useHuddleMedia();
+
+  // Active speaker detection
+  const activeSpeakerId = useActiveSpeaker({
+    isHuddleActive,
+    localStream,
+    remoteStreams,
+    currentMemberId: currentMember?._id || null,
+  });
 
   // Hidden audio elements for remote streams (to play audio even when dialog is closed)
-  const remoteAudioRefs = useRef<Map<Id<"members">, HTMLAudioElement>>(new Map());
+  const remoteAudioRefs = useRef<Map<Id<"members">, HTMLAudioElement>>(
+    new Map()
+  );
   const playingRefs = useRef<Map<Id<"members">, boolean>>(new Map());
 
   // Update remote audio elements to play audio even when dialog is closed
@@ -119,7 +157,7 @@ function HuddleBarContent() {
 
     remoteStreams.forEach((stream, memberId) => {
       let audioElement = remoteAudioRefs.current.get(memberId);
-      
+
       if (!audioElement) {
         // Create hidden audio element
         audioElement = document.createElement("audio");
@@ -132,7 +170,7 @@ function HuddleBarContent() {
 
       // Ensure audio tracks are enabled
       const audioTracks = stream.getAudioTracks();
-      audioTracks.forEach((track) => {
+      audioTracks.forEach((track: MediaStreamTrack) => {
         if (!track.enabled) {
           track.enabled = true;
         }
@@ -144,20 +182,39 @@ function HuddleBarContent() {
       }
 
       audioElement.muted = false;
-      audioElement.volume = 1.0;
+      audioElement.volume = settings.outputVolume;
+
+      // Set speaker output device (sinkId)
+      if (settings.selectedSpeakerId && "setSinkId" in audioElement) {
+        (
+          audioElement as HTMLAudioElement & {
+            setSinkId: (id: string) => Promise<void>;
+          }
+        )
+          .setSinkId(settings.selectedSpeakerId)
+          .catch((err) => {
+            console.warn(`Failed to set speaker device for ${memberId}:`, err);
+          });
+      }
 
       // Play if not already playing
       const isPlaying = playingRefs.current.get(memberId);
       if (!isPlaying && audioElement.readyState >= 2) {
         playingRefs.current.set(memberId, true);
-        audioElement.play().then(() => {
-          console.log(`Playing audio for ${memberId} in HuddleBar`);
-        }).catch((err) => {
-          playingRefs.current.set(memberId, false);
-          if (!err.message.includes("interrupted") && !err.message.includes("AbortError")) {
-            console.error(`Error playing audio for ${memberId}:`, err);
-          }
-        });
+        audioElement
+          .play()
+          .then(() => {
+            console.log(`Playing audio for ${memberId} in HuddleBar`);
+          })
+          .catch((err) => {
+            playingRefs.current.set(memberId, false);
+            if (
+              !err.message.includes("interrupted") &&
+              !err.message.includes("AbortError")
+            ) {
+              console.error(`Error playing audio for ${memberId}:`, err);
+            }
+          });
       }
     });
 
@@ -170,7 +227,12 @@ function HuddleBarContent() {
         playingRefs.current.delete(memberId);
       }
     });
-  }, [remoteStreams, isHuddleActive]);
+  }, [
+    remoteStreams,
+    isHuddleActive,
+    settings.outputVolume,
+    settings.selectedSpeakerId,
+  ]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -191,10 +253,92 @@ function HuddleBarContent() {
     return participants.map((p) => ({
       id: p.memberId,
       name: getUserDisplayName(p.user),
+      image: (p.user as { image?: string | null })?.image || undefined,
       isYou: p.memberId === currentMember._id,
       role: p.role,
+      isMuted: p.isMuted,
     }));
   }, [participants, currentMember]);
+
+  // Show reconnect UI if there's a disconnected active huddle
+  // Check: we have a disconnected huddle but it's not the same as our current one
+  // or we don't have a current huddle
+  const shouldShowReconnectBanner = 
+    disconnectedHuddle && 
+    (!effectiveHuddleId || disconnectedHuddle._id !== effectiveHuddleId);
+  
+  console.log("🎯 Banner decision:", {
+    disconnectedHuddle: disconnectedHuddle?._id,
+    effectiveHuddleId,
+    shouldShow: shouldShowReconnectBanner,
+  });
+
+  if (shouldShowReconnectBanner) {
+    const handleReconnect = () => {
+      if (!workspaceId || !disconnectedHuddle.otherMemberId) return;
+
+      startOrJoinHuddle(
+        {
+          workspaceId,
+          sourceType: "dm",
+          sourceId: disconnectedHuddle.otherMemberId,
+          startMuted: settings.startMuted,
+        },
+        {
+          onSuccess: (huddleId) => {
+            console.log("Reconnected to huddle:", huddleId);
+            playHuddleSound("join");
+            setHuddleState((prev) => ({
+              ...prev,
+              currentHuddleId: huddleId,
+              isHuddleActive: true,
+              isHuddleOpen: false,
+              huddleSource: "dm",
+              huddleSourceId: disconnectedHuddle.otherMemberId || null,
+              incomingHuddle: null,
+            }));
+          },
+          onError: (error) => {
+            console.error("Failed to reconnect:", error);
+          },
+        }
+      );
+    };
+
+    return (
+      <>
+        <div className="fixed bottom-0 left-0 right-0 z-50 bg-[#5E2C5F] text-white shadow-2xl border-t-2 border-[#4A1C4F]">
+          <div className="container mx-auto px-4 py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="size-3 bg-green-400 rounded-full animate-pulse" />
+                <span className="text-sm font-medium">
+                  Active huddle in progress
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleReconnect}
+                  className="bg-white/10 hover:bg-white/20 text-white"
+                >
+                  <Phone className="size-4 mr-2" />
+                  Rejoin Huddle
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <HuddleDialog
+          open={huddleState.isHuddleOpen}
+          onOpenChange={(open) =>
+            setHuddleState((prev) => ({ ...prev, isHuddleOpen: open }))
+          }
+        />
+      </>
+    );
+  }
 
   // Don't show anything when huddle is not active
   if (!isHuddleActive) {
@@ -218,6 +362,8 @@ function HuddleBarContent() {
   };
 
   const handleLeave = () => {
+    // Play hangup sound
+    playHuddleSound("hangup");
     const huddleIdToLeave = effectiveHuddleId;
     if (huddleIdToLeave) {
       leaveHuddle(huddleIdToLeave, {
@@ -227,6 +373,8 @@ function HuddleBarContent() {
             isHuddleActive: false,
             isHuddleOpen: false,
             currentHuddleId: null,
+            huddleSource: null,
+            huddleSourceId: null,
           }));
         },
       });
@@ -237,6 +385,8 @@ function HuddleBarContent() {
         isHuddleActive: false,
         isHuddleOpen: false,
         currentHuddleId: null,
+        huddleSource: null,
+        huddleSourceId: null,
       }));
     }
   };
@@ -277,24 +427,44 @@ function HuddleBarContent() {
           onClick={handleToggleDialog}
         >
           <div className="flex items-center justify-center gap-2.5">
-            {displayParticipants.map((participant) => (
-              <div
-                key={participant.id}
-                className="size-12 rounded-lg bg-white flex items-center justify-center shadow-md"
-                title={
-                  participant.name +
-                  (participant.role === "host" ? " (Host)" : "")
-                }
-              >
-                <span className="text-xl font-bold text-gray-700">
-                  {participant.name.charAt(0).toUpperCase()}
-                </span>
-              </div>
-            ))}
+            {displayParticipants.map((participant) => {
+              const isActiveSpeaker = activeSpeakerId === participant.id;
+              return (
+                <div key={participant.id} className="relative">
+                  <Avatar
+                    className={`size-12 rounded-lg shadow-md ${
+                      isActiveSpeaker ? "ring-2 ring-[#5E2C5F]" : ""
+                    }`}
+                    title={
+                      participant.name +
+                      (participant.role === "host" ? " (Host)" : "") +
+                      (isActiveSpeaker ? " (Speaking)" : "") +
+                      (participant.isMuted ? " (Muted)" : "")
+                    }
+                  >
+                    <AvatarImage
+                      src={participant.image || undefined}
+                      alt={participant.name}
+                      className="rounded-lg"
+                    />
+                    <AvatarFallback className="rounded-lg bg-white text-xl font-bold text-gray-700">
+                      {participant.name.charAt(0).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  {participant.isMuted && (
+                    <div className="absolute -bottom-1 -right-1 bg-red-500 rounded-full p-1">
+                      <MicOff className="size-3 text-white" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             {/* Add participant card */}
-            <div className="size-12 rounded-lg bg-white flex items-center justify-center shadow-md cursor-pointer hover:bg-gray-50 transition-colors">
-              <UserPlus className="size-5 text-[#5E2C5F]" />
-            </div>
+            {displayParticipants.length < 2 && (
+              <div className="size-12 rounded-lg bg-white flex items-center justify-center shadow-md cursor-pointer hover:bg-gray-50 transition-colors">
+                <UserPlus className="size-5 text-[#5E2C5F]" />
+              </div>
+            )}
           </div>
         </div>
 
@@ -324,12 +494,13 @@ function HuddleBarContent() {
             <Button
               variant="ghost"
               size="icon"
-              className={`size-9 rounded-full border-0 transition-all ${
+              className={`size-9 rounded-full border-0 transition-all opacity-50 cursor-not-allowed ${
                 !isVideoEnabled
-                  ? "bg-black/20 hover:bg-black/30 text-white"
-                  : "bg-green-500/20 hover:bg-green-500/30 text-white"
+                  ? "bg-black/20 text-white"
+                  : "bg-green-500/20 text-white"
               }`}
-              title={!isVideoEnabled ? "Turn on video" : "Turn off video"}
+              title="Video disabled"
+              disabled
               onClick={toggleVideo}
             >
               {!isVideoEnabled ? (
@@ -343,25 +514,27 @@ function HuddleBarContent() {
             <Button
               variant="ghost"
               size="icon"
-              className={`size-9 rounded-full border-0 transition-all ${
+              className={`size-9 rounded-full border-0 transition-all opacity-50 cursor-not-allowed ${
                 isScreenSharing
-                  ? "bg-green-500/20 hover:bg-green-500/30 text-white"
-                  : "bg-black/20 hover:bg-black/30 text-white"
+                  ? "bg-green-500/20 text-white"
+                  : "bg-black/20 text-white"
               }`}
-              title={isScreenSharing ? "Stop sharing" : "Share screen"}
+              title="Screen sharing disabled"
+              disabled
               onClick={toggleScreenShare}
             >
               <Monitor className="size-4.5" />
             </Button>
 
-            {/* More options button */}
+            {/* Settings button */}
             <Button
               variant="ghost"
               size="icon"
               className="size-9 rounded-full bg-black/20 hover:bg-black/30 text-white border-0"
-              title="More options"
+              title="Audio Settings"
+              onClick={() => openSettings("audio-video")}
             >
-              <MoreVertical className="size-4.5" />
+              <Settings className="size-4.5" />
             </Button>
           </div>
 
@@ -416,16 +589,22 @@ export function HuddleBar() {
   });
 
   // Use currentHuddleId from state if available (for immediate updates after join)
-  const effectiveHuddleId = huddleState.currentHuddleId || activeHuddle?._id || null;
+  const effectiveHuddleId =
+    huddleState.currentHuddleId || activeHuddle?._id || null;
 
   // Check if huddle is active (from state or Convex)
-  const isHuddleActive = huddleState.currentHuddleId ? true : (activeHuddle?.isActive ?? false);
+  const isHuddleActive = huddleState.currentHuddleId
+    ? true
+    : activeHuddle?.isActive ?? false;
 
   // Wrap with media provider when huddle is active
   // Pass huddleId so WebRTC is managed in the provider
   if (isHuddleActive) {
     return (
-      <HuddleMediaProvider enabled={isHuddleActive} huddleId={effectiveHuddleId}>
+      <HuddleMediaProvider
+        enabled={isHuddleActive}
+        huddleId={effectiveHuddleId}
+      >
         <HuddleBarContent />
       </HuddleMediaProvider>
     );

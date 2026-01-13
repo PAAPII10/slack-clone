@@ -14,6 +14,7 @@ interface UseStartOrJoinHuddleProps {
   workspaceId: Id<"workspaces">;
   sourceType: HuddleSource;
   sourceId: Id<"channels"> | Id<"conversations"> | Id<"members">;
+  startMuted?: boolean;
 }
 
 export function useStartOrJoinHuddle() {

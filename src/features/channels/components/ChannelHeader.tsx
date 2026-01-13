@@ -23,7 +23,9 @@ import { useCurrentMember } from "@/features/members/api/use-current-member";
 import { ChannelMembers } from "./ChannelMembers";
 import { useHuddleState } from "@/features/huddle/store/use-huddle-state";
 import { useStartOrJoinHuddle } from "@/features/huddle/api/use-start-or-join-huddle";
+import { playHuddleSound } from "@/lib/huddle-sounds";
 import { Hint } from "@/components/Hint";
+import { useHuddleAudioSettings } from "@/features/huddle/hooks/use-huddle-audio-settings";
 
 interface ChannelHeaderProps {
   title: string;
@@ -47,6 +49,7 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
   const { data: member } = useCurrentMember({ workspaceId });
   const [, setHuddleState] = useHuddleState();
   const { mutate: startOrJoinHuddle } = useStartOrJoinHuddle();
+  const { settings } = useHuddleAudioSettings();
 
   const { mutate: updateChannel, isPending: isUpdatingChannel } =
     useUpdateChannel();
@@ -109,10 +112,13 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
         workspaceId,
         sourceType: "channel",
         sourceId: channelId,
+        startMuted: settings.startMuted,
       },
       {
         onSuccess: (huddleId) => {
           console.log("Huddle started/joined successfully:", huddleId);
+          // Play join sound
+          playHuddleSound("join");
           setHuddleState((prev) => ({
             ...prev,
             currentHuddleId: huddleId,

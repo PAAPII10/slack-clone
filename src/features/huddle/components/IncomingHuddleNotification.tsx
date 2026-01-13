@@ -7,13 +7,15 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { X, Phone } from "lucide-react";
+import { Phone } from "lucide-react";
 import { useHuddleState } from "../store/use-huddle-state";
 import { useGetMember } from "@/features/members/api/use-get-member";
 import { getUserDisplayName } from "@/lib/user-utils";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { useStartOrJoinHuddle } from "../api/use-start-or-join-huddle";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
+import { playHuddleSound, stopHuddleSound } from "@/lib/huddle-sounds";
+import { useEffect } from "react";
 
 /**
  * IncomingHuddleNotification Component
@@ -53,10 +55,20 @@ export function IncomingHuddleNotification() {
   // TODO (PHASE 2): Get this from Convex real-time updates
   const showNotification = !!huddleState.incomingHuddle;
 
+  // Stop incoming call sound when notification is cleared
+  useEffect(() => {
+    if (!showNotification) {
+      stopHuddleSound("incoming_call");
+    }
+  }, [showNotification]);
+
   const handleJoin = () => {
     if (!huddleState.incomingHuddle || !workspaceId) return;
     
     const incomingHuddle = huddleState.incomingHuddle;
+    
+    // Stop incoming call sound
+    stopHuddleSound("incoming_call");
     
     // Clear notification first
     setHuddleState((prev) => ({
@@ -74,6 +86,8 @@ export function IncomingHuddleNotification() {
       {
         onSuccess: (huddleId) => {
           console.log("Joined huddle from notification:", huddleId);
+          // Play join sound
+          playHuddleSound("join");
           setHuddleState((prev) => ({
             ...prev,
             currentHuddleId: huddleId,
@@ -91,6 +105,9 @@ export function IncomingHuddleNotification() {
   };
 
   const handleDecline = () => {
+    // Stop incoming call sound
+    stopHuddleSound("incoming_call");
+    
     // TODO (PHASE 2): Decline huddle invitation
     // Clear the incoming notification
     setHuddleState((prev) => ({
@@ -99,35 +116,42 @@ export function IncomingHuddleNotification() {
     }));
   };
 
-  const handleClose = () => {
-    handleDecline();
-  };
-
   if (!showNotification) {
     return null;
   }
 
   return (
-    <Dialog open={showNotification} onOpenChange={handleClose}>
-      <DialogContent className="max-w-sm p-0 overflow-hidden bg-gray-900 border-gray-700">
+    <Dialog open={showNotification} onOpenChange={(open) => {
+      // Prevent closing by clicking outside - only allow explicit close via buttons
+      if (!open) {
+        // Only close if explicitly handled by buttons (handleClose/handleDecline)
+        // This prevents accidental dismissal
+        return;
+      }
+    }}>
+      <DialogContent 
+        className="max-w-sm p-0 overflow-hidden bg-gray-900 border-gray-700"
+        showCloseButton={false}
+        onInteractOutside={(e) => {
+          // Prevent closing when clicking outside
+          e.preventDefault();
+        }}
+        onEscapeKeyDown={(e) => {
+          // Allow ESC key to decline the call
+          e.preventDefault();
+          handleDecline();
+        }}
+      >
         <DialogTitle className="sr-only">
           Incoming SyncUp from {displayName}
         </DialogTitle>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+        <div className="flex items-center justify-center px-6 py-4 border-b border-gray-800">
           <div className="flex items-center gap-3">
             <Phone className="size-5 text-white" />
             <span className="text-white font-medium">Incoming SyncUp</span>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleClose}
-            className="size-8 hover:bg-gray-800 text-white"
-          >
-            <X className="size-4" />
-          </Button>
         </div>
 
         {/* Caller Information */}
