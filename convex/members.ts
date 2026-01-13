@@ -3,8 +3,21 @@ import { mutation, query, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 
-function populateUser(ctx: QueryCtx, id: Id<"users">) {
-  return ctx.db.get(id);
+async function populateUser(ctx: QueryCtx, id: Id<"users">) {
+  const user = await ctx.db.get(id);
+  if (!user) return null;
+
+  // Get user profile for display name
+  const userProfile = await ctx.db
+    .query("userProfiles")
+    .withIndex("by_user_id", (q) => q.eq("userId", id))
+    .unique();
+
+  return {
+    ...user,
+    displayName: userProfile?.displayName,
+    fullName: userProfile?.fullName,
+  };
 }
 
 export const current = query({
@@ -105,12 +118,6 @@ export const get = query({
 
       const user = await populateUser(ctx, memberData.userId);
       if (user) {
-        // Get user profile for display name
-        const userProfile = await ctx.db
-          .query("userProfiles")
-          .withIndex("by_user_id", (q) => q.eq("userId", user._id))
-          .unique();
-
         // Get conversation ID and unread count for this member
         const conversationId = memberConversationMap.get(memberData._id);
         const unreadCount = conversationId
@@ -121,8 +128,8 @@ export const get = query({
           ...memberData,
           user: {
             ...user,
-            displayName: userProfile?.displayName,
-            fullName: userProfile?.fullName,
+            displayName: user.displayName,
+            fullName: user.fullName,
           },
           unreadCount,
         });
@@ -159,7 +166,7 @@ export const getById = query({
 
     if (!user) return null;
 
-    // Get user profile for display name and additional fields
+    // Get user profile for additional fields
     const userProfile = await ctx.db
       .query("userProfiles")
       .withIndex("by_user_id", (q) => q.eq("userId", user._id))
@@ -169,12 +176,50 @@ export const getById = query({
       ...member,
       user: {
         ...user,
-        displayName: userProfile?.displayName,
-        fullName: userProfile?.fullName,
+        displayName: user.displayName,
+        fullName: user.fullName,
         title: userProfile?.title,
         pronunciation: userProfile?.pronunciation,
       },
     };
+  },
+});
+
+export const getByIds = query({
+  args: {
+    memberIds: v.array(v.id("members")),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+
+    if (!userId) {
+      return [];
+    }
+
+    const members = await Promise.all(
+      args.memberIds.map((memberId) => ctx.db.get(memberId))
+    );
+
+    const validMembers = members.filter(
+      (m): m is NonNullable<typeof m> => m !== null
+    );
+
+    const membersWithUsers = [];
+    for (const member of validMembers) {
+      const user = await populateUser(ctx, member.userId);
+      if (user) {
+        membersWithUsers.push({
+          ...member,
+          user: {
+            ...user,
+            displayName: user.displayName,
+            fullName: user.fullName,
+          },
+        });
+      }
+    }
+
+    return membersWithUsers;
   },
 });
 

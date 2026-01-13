@@ -32,6 +32,7 @@ interface MessageProps {
     Omit<Doc<"reactions">, "memberId"> & {
       count: number;
       memberIds: Id<"members">[];
+      memberNames?: string[];
     }
   >;
   body: Doc<"messages">["body"];
