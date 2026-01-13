@@ -10,7 +10,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { TrashIcon } from "lucide-react";
+import { TrashIcon, Phone } from "lucide-react";
 import { FaChevronDown } from "react-icons/fa";
 import { useUpdateChannel } from "../api/use-update-channel";
 import { useRemoveChannel } from "../api/use-remove-channel";
@@ -21,6 +21,9 @@ import { useRouter } from "next/navigation";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { useCurrentMember } from "@/features/members/api/use-current-member";
 import { ChannelMembers } from "./ChannelMembers";
+import { useHuddleState } from "@/features/huddle/store/use-huddle-state";
+import { useStartOrJoinHuddle } from "@/features/huddle/api/use-start-or-join-huddle";
+import { Hint } from "@/components/Hint";
 
 interface ChannelHeaderProps {
   title: string;
@@ -42,6 +45,8 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
   });
 
   const { data: member } = useCurrentMember({ workspaceId });
+  const [, setHuddleState] = useHuddleState();
+  const { mutate: startOrJoinHuddle } = useStartOrJoinHuddle();
 
   const { mutate: updateChannel, isPending: isUpdatingChannel } =
     useUpdateChannel();
@@ -90,6 +95,35 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
         },
         onError: () => {
           toast.error("Failed to delete channel");
+        },
+      }
+    );
+  };
+
+  const handleStartHuddle = () => {
+    if (!channelId || !workspaceId) return;
+    
+    // Immediately start/join huddle - no join screen
+    startOrJoinHuddle(
+      {
+        workspaceId,
+        sourceType: "channel",
+        sourceId: channelId,
+      },
+      {
+        onSuccess: (huddleId) => {
+          console.log("Huddle started/joined successfully:", huddleId);
+          setHuddleState((prev) => ({
+            ...prev,
+            currentHuddleId: huddleId,
+            isHuddleActive: true,
+            isHuddleOpen: true,
+            huddleSource: "channel",
+            huddleSourceId: channelId,
+          }));
+        },
+        onError: (error) => {
+          console.error("Failed to start huddle:", error);
         },
       }
     );
@@ -226,7 +260,19 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
           </DialogContent>
         </Dialog>
       </div>
-      <ChannelMembers channelType={channelType} />
+      <div className="flex items-center gap-1">
+        <Hint label="Start Huddle">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-sm"
+            onClick={handleStartHuddle}
+          >
+            <Phone className="size-4" />
+          </Button>
+        </Hint>
+        <ChannelMembers channelType={channelType} />
+      </div>
     </div>
   );
 }

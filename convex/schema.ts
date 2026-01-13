@@ -129,6 +129,40 @@ const schema = defineSchema({
     title: v.optional(v.string()),
     pronunciation: v.optional(v.string()),
   }).index("by_user_id", ["userId"]),
+  huddles: defineTable({
+    workspaceId: v.id("workspaces"),
+    sourceType: v.union(v.literal("channel"), v.literal("dm")),
+    channelId: v.optional(v.id("channels")), // For channel huddles
+    conversationId: v.optional(v.id("conversations")), // For DM huddles
+    createdBy: v.id("members"),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    startedAt: v.number(), // When huddle actually started (when first participant joined)
+    endedAt: v.optional(v.number()), // When huddle ended (when isActive became false)
+  })
+    .index("by_workspace_id", ["workspaceId"])
+    .index("by_channel_id", ["channelId"])
+    .index("by_conversation_id", ["conversationId"]),
+  huddleParticipants: defineTable({
+    huddleId: v.id("huddles"),
+    memberId: v.id("members"),
+    joinedAt: v.number(),
+    leftAt: v.optional(v.number()),
+    role: v.union(v.literal("host"), v.literal("participant")),
+  })
+    .index("by_huddle_id", ["huddleId"])
+    .index("by_member_id", ["memberId"])
+    .index("by_huddle_id_member_id", ["huddleId", "memberId"]),
+  huddleSignals: defineTable({
+    huddleId: v.id("huddles"),
+    fromMemberId: v.id("members"),
+    toMemberId: v.id("members"),
+    signal: v.any(), // WebRTC signal object (offer, answer, or ICE candidate)
+    createdAt: v.number(),
+  })
+    .index("by_huddle_id", ["huddleId"])
+    .index("by_to_member_id", ["toMemberId"])
+    .index("by_huddle_id_to_member_id", ["huddleId", "toMemberId"]),
 });
 
 export default schema;

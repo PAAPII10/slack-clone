@@ -263,8 +263,16 @@ export function Message({
                   {attachments.map((attachment, index) => (
                     <Thumbnail
                       key={index}
-                      url={typeof attachment === "string" ? attachment : attachment.url}
-                      size={typeof attachment === "string" ? undefined : attachment.size ?? undefined}
+                      url={
+                        typeof attachment === "string"
+                          ? attachment
+                          : attachment.url
+                      }
+                      size={
+                        typeof attachment === "string"
+                          ? undefined
+                          : attachment.size ?? undefined
+                      }
                     />
                   ))}
                 </div>

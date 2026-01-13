@@ -163,7 +163,7 @@ export function Thumbnail({ url, size }: ThumbnailProps) {
         }
       } catch (error) {
         console.warn("Failed to fetch file size:", error);
-      setFileSize(null);
+        setFileSize(null);
       }
     };
 

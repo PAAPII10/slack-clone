@@ -42,7 +42,16 @@ export function formatFileSize(bytes: number): string {
 
 export function getSpecificFileType(
   file: File
-): "pdf" | "excel" | "word" | "text" | "json" | "csv" | "powerpoint" | "zip" | "other" {
+):
+  | "pdf"
+  | "excel"
+  | "word"
+  | "text"
+  | "json"
+  | "csv"
+  | "powerpoint"
+  | "zip"
+  | "other" {
   const name = file.name.toLowerCase();
   const type = file.type.toLowerCase();
 

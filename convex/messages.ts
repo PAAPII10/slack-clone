@@ -365,7 +365,9 @@ export const get = query({
               attachmentIds.map(async (id) => {
                 const url = await ctx.storage.getUrl(id);
                 if (!url) return null;
-                const metadata = await ctx.db.system.get("_storage", id).catch(() => null);
+                const metadata = await ctx.db.system
+                  .get("_storage", id)
+                  .catch(() => null);
                 return {
                   url,
                   size: metadata?.size ?? null,
@@ -373,7 +375,9 @@ export const get = query({
               })
             );
             // Filter out null entries
-            const validAttachments = attachments.filter((att): att is { url: string; size: number | null } => att !== null);
+            const validAttachments = attachments.filter(
+              (att): att is { url: string; size: number | null } => att !== null
+            );
 
             const reactionsWithCounts = reactions.map((reaction) => {
               return {
@@ -570,7 +574,9 @@ export const messageById = query({
       attachmentIds.map(async (id) => {
         const url = await ctx.storage.getUrl(id);
         if (!url) return null;
-        const metadata = await ctx.db.system.get("_storage", id).catch(() => null);
+        const metadata = await ctx.db.system
+          .get("_storage", id)
+          .catch(() => null);
         return {
           url,
           size: metadata?.size ?? null,
@@ -578,7 +584,9 @@ export const messageById = query({
       })
     );
     // Filter out null entries
-    const validAttachments = attachments.filter((att): att is { url: string; size: number | null } => att !== null);
+    const validAttachments = attachments.filter(
+      (att): att is { url: string; size: number | null } => att !== null
+    );
 
     return {
       ...message,
