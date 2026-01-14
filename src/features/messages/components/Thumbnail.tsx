@@ -25,6 +25,8 @@ function renderFileIcon(specificType: string) {
       return <img src="/word-icon.svg" alt="Word" className="size-8" />;
     case "text":
       return <img src="/text-file.svg" alt="Text" className="size-8" />;
+    case "markdown":
+      return <img src="/md-icon.svg" alt="Markdown" className="size-8" />;
     case "json":
       return <img src="/json-icon.svg" alt="JSON" className="size-8" />;
     case "csv":
@@ -47,6 +49,7 @@ async function detectFileTypeFromContentType(
   | "excel"
   | "word"
   | "text"
+  | "markdown"
   | "json"
   | "csv"
   | "powerpoint"
@@ -79,7 +82,17 @@ async function detectFileTypeFromContentType(
       ) {
         return "word";
       }
+      if (contentType.includes("markdown")) {
+        return "markdown";
+      }
       if (contentType.startsWith("text/")) {
+        // Check if it's markdown by URL extension
+        if (
+          url.toLowerCase().endsWith(".md") ||
+          url.toLowerCase().endsWith(".markdown")
+        ) {
+          return "markdown";
+        }
         return "text";
       }
       if (contentType.includes("json")) {
@@ -122,6 +135,7 @@ export function Thumbnail({ url, size }: ThumbnailProps) {
     | "excel"
     | "word"
     | "text"
+    | "markdown"
     | "json"
     | "csv"
     | "powerpoint"
@@ -291,6 +305,7 @@ export function Thumbnail({ url, size }: ThumbnailProps) {
             {fileType === "excel" && "Excel Spreadsheet"}
             {fileType === "word" && "Word Document"}
             {fileType === "text" && "Text File"}
+            {fileType === "markdown" && "Markdown File"}
             {fileType === "json" && "JSON File"}
             {fileType === "csv" && "CSV File"}
             {fileType === "powerpoint" && "PowerPoint Presentation"}

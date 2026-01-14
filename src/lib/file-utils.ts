@@ -47,6 +47,7 @@ export function getSpecificFileType(
   | "excel"
   | "word"
   | "text"
+  | "markdown"
   | "json"
   | "csv"
   | "powerpoint"
@@ -74,11 +75,10 @@ export function getSpecificFileType(
   ) {
     return "word";
   }
-  if (
-    name.endsWith(".txt") ||
-    name.endsWith(".md") ||
-    type.startsWith("text/")
-  ) {
+  if (name.endsWith(".md") || name.endsWith(".markdown")) {
+    return "markdown";
+  }
+  if (name.endsWith(".txt") || type.startsWith("text/")) {
     return "text";
   }
   if (name.endsWith(".json") || type.includes("json")) {

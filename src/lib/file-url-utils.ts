@@ -1,6 +1,18 @@
 export function getSpecificFileTypeFromUrl(
   url: string
-): "pdf" | "excel" | "word" | "text" | "json" | "csv" | "powerpoint" | "zip" | "image" | "video" | "other" {
+):
+  | "pdf"
+  | "excel"
+  | "word"
+  | "text"
+  | "markdown"
+  | "json"
+  | "csv"
+  | "powerpoint"
+  | "zip"
+  | "image"
+  | "video"
+  | "other" {
   const lowerUrl = url.toLowerCase();
 
   // Image extensions
@@ -23,7 +35,10 @@ export function getSpecificFileTypeFromUrl(
   if (/\.(doc|docx)$/i.test(lowerUrl)) {
     return "word";
   }
-  if (/\.(txt|md)$/i.test(lowerUrl)) {
+  if (/\.(md|markdown)$/i.test(lowerUrl)) {
+    return "markdown";
+  }
+  if (/\.(txt)$/i.test(lowerUrl)) {
     return "text";
   }
   if (/\.(json)$/i.test(lowerUrl)) {
@@ -48,12 +63,12 @@ export function getFileNameFromUrl(url: string): string {
     const urlObj = new URL(url);
     const pathname = urlObj.pathname;
     const filename = pathname.split("/").pop() || "file";
-    
+
     // If it's a storage URL without extension, try to get from query params or use generic name
     if (!filename.includes(".")) {
       return "attachment";
     }
-    
+
     return decodeURIComponent(filename);
   } catch {
     // If URL parsing fails, try to extract from path

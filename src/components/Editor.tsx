@@ -148,7 +148,8 @@ export default function Editor({
       "application/vnd.ms-powerpoint": [".ppt"],
       "application/vnd.openxmlformats-officedocument.presentationml.presentation":
         [".pptx"],
-      "text/*": [".txt", ".csv", ".md"],
+      "text/*": [".txt", ".csv"],
+      "text/markdown": [".md", ".markdown"],
       "application/json": [".json"],
       "application/zip": [".zip"],
       "application/x-zip-compressed": [".zip"],
@@ -579,6 +580,8 @@ function renderFileIcon(file: File) {
       return <img src="/word-icon.svg" alt="Word file" className="size-6" />;
     case "text":
       return <img src="/text-file.svg" alt="Text file" className="size-6" />;
+    case "markdown":
+      return <img src="/md-icon.svg" alt="Markdown file" className="size-6" />;
     case "json":
       return <img src="/json-icon.svg" alt="JSON file" className="size-6" />;
     case "csv":
