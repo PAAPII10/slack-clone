@@ -177,8 +177,8 @@ export function WorkspaceSidebar() {
       <WorkspaceSection
         label="Direct Messages"
         hint="New direct message"
-        onNew={() => {}}
         defaultOpen
+        className="max-h-[400px]"
       >
         {[...(members || [])]
           .sort((a, b) => {

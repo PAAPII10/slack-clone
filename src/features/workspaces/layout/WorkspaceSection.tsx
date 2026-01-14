@@ -5,6 +5,7 @@ import { Plus } from "lucide-react";
 import { ReactNode } from "react";
 import { FaCaretDown } from "react-icons/fa";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface WorkspaceSectionProps {
   defaultOpen?: boolean;
@@ -12,6 +13,7 @@ interface WorkspaceSectionProps {
   label: string;
   hint: string;
   onNew?: () => void;
+  className?: string;
 }
 
 export function WorkspaceSection({
@@ -20,11 +22,12 @@ export function WorkspaceSection({
   label,
   hint,
   onNew,
+  className,
 }: WorkspaceSectionProps) {
   const [on, toggle] = useToggle(defaultOpen);
   return (
     <div className="flex flex-col mt-3 px-2">
-      <div className="flex items-center px-1.5 group">
+      <div className="flex items-center px-1.5 group shrink-0">
         <Button
           variant="transparent"
           className="p-0.5 text-sm text-[#f9edffcc] shrink-0 size-6"
@@ -54,7 +57,11 @@ export function WorkspaceSection({
           </Hint>
         )}
       </div>
-      {on && children}
+      {on && (
+        <ScrollArea className={cn("max-h-[250px]", className)}>
+          {children}
+        </ScrollArea>
+      )}
     </div>
   );
 }

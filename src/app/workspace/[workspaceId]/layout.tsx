@@ -19,16 +19,24 @@ import { useGlobalNotifications } from "@/hooks/use-global-notifications";
 import { usePresence } from "@/features/presence/api/use-presence";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { useHuddleNotifications } from "@/features/huddle/hooks/use-huddle-notifications";
+import { useGetWorkspace } from "@/features/workspaces/api/use-get-workspace";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 export default function WorkspaceIdLayout({ children }: PropsWithChildren) {
   const workspaceId = useWorkspaceId();
-  
+  const { data: workspace } = useGetWorkspace({
+    id: workspaceId,
+  });
+
+  // Update document title based on workspace name
+  useDocumentTitle(workspace?.name);
+
   // Global notifications for all workspace messages
   useGlobalNotifications();
-  
+
   // Huddle notifications (for incoming huddles)
   useHuddleNotifications();
-  
+
   // Track user presence (online/offline status)
   usePresence({ workspaceId: workspaceId!, enabled: !!workspaceId });
   const { parentMessageId, profileMemberId, onCloseMessage, onCloseProfile } =

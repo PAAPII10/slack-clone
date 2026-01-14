@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
-import { Info, Search } from "lucide-react";
+import { Info, Search, UserIcon } from "lucide-react";
 import { useGetWorkspace } from "../api/use-get-workspace";
 import {
   CommandDialog,
@@ -56,7 +56,7 @@ export function Toolbar() {
           <span className="text-white text-xs">Search {data?.name}</span>
         </Button>
         <CommandDialog open={open} onOpenChange={setOpen}>
-          <CommandInput placeholder="Type a command or search..." />
+          <CommandInput placeholder="Type a channel or member name..." />
           <CommandList>
             <CommandEmpty>No results found.</CommandEmpty>
             <CommandGroup heading="Channels">
@@ -65,7 +65,7 @@ export function Toolbar() {
                   key={channel._id}
                   onSelect={() => onChannelClick(channel._id)}
                 >
-                  {channel.name}
+                  # {channel.name}
                 </CommandItem>
               ))}
             </CommandGroup>
@@ -76,6 +76,7 @@ export function Toolbar() {
                   key={member._id}
                   onSelect={() => onMemberClick(member._id)}
                 >
+                  <UserIcon className="size-4 text-slate-800 mr-2" />{" "}
                   {getUserDisplayName(member.user)}
                 </CommandItem>
               ))}
