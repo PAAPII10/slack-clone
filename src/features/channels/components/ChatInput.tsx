@@ -99,7 +99,6 @@ export function ChatInput({ placeholder }: ChatInputProps) {
     <div className="w-full px-5">
       <Editor
         key={editorKey}
-        channelId={channelId}
         placeholder={placeholder}
         disabled={isPending}
         innerRef={editorRef}
