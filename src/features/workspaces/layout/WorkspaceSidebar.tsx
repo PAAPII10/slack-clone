@@ -178,7 +178,7 @@ export function WorkspaceSidebar() {
         label="Direct Messages"
         hint="New direct message"
         defaultOpen
-        className="max-h-[300px]"
+        className="max-h-[400px]"
       >
         {[...(members || [])]
           .sort((a, b) => {
