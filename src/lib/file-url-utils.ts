@@ -77,3 +77,168 @@ export function getFileNameFromUrl(url: string): string {
     return lastPart.includes(".") ? decodeURIComponent(lastPart) : "attachment";
   }
 }
+
+/**
+ * Gets a human-readable description for a file type.
+ * 
+ * @param fileType - The file type to get description for
+ * @returns A string description of the file type
+ */
+export function getFileTypeDescription(
+  fileType:
+    | "pdf"
+    | "excel"
+    | "word"
+    | "text"
+    | "markdown"
+    | "json"
+    | "csv"
+    | "powerpoint"
+    | "zip"
+    | "image"
+    | "video"
+    | "other"
+): string {
+  switch (fileType) {
+    case "pdf":
+      return "PDF Document";
+    case "excel":
+      return "Excel Spreadsheet";
+    case "word":
+      return "Word Document";
+    case "text":
+      return "Text File";
+    case "markdown":
+      return "Markdown File";
+    case "json":
+      return "JSON File";
+    case "csv":
+      return "CSV File";
+    case "powerpoint":
+      return "PowerPoint Presentation";
+    case "zip":
+      return "ZIP Archive";
+    case "image":
+      return "Image";
+    case "video":
+      return "Video";
+    case "other":
+    default:
+      return "File Attachment";
+  }
+}
+
+/**
+ * Download file with Sonner toast.promise showing progress
+ * Uses toast.loading for progress updates, then shows success/error
+ */
+export const downloadFileWithToast = async ({
+  url,
+  fileName,
+  loadingMessage = 'Preparing download...',
+  successMessage,
+  errorMessage = 'Failed to download file',
+}: {
+  url: string;
+  fileName: string;
+  loadingMessage?: string;
+  successMessage?: string;
+  errorMessage?: string;
+}) => {
+  // Dynamic import to avoid SSR issues
+  const { toast } = await import('sonner');
+
+  let progressToastId: string | number | undefined;
+
+  const downloadPromise = new Promise<void>((resolve, reject) => {
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', url, true);
+      xhr.responseType = 'blob';
+
+      // Start with initial loading message
+      progressToastId = toast.loading(loadingMessage);
+
+      xhr.onprogress = (event) => {
+        if (event.lengthComputable && progressToastId) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          toast.loading(`Downloading... ${percent}%`, {
+            id: progressToastId,
+          });
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          const blob = xhr.response;
+
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+
+          const filename = fileName || 'file';
+
+          link.download = filename.replace(/"/g, '');
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+
+          // Dismiss progress toast and show success
+          if (progressToastId) {
+            toast.dismiss(progressToastId);
+          }
+          toast.success(successMessage || `Downloaded ${fileName} successfully!`);
+          resolve();
+        } else {
+          console.error('Error downloading file. Status:', xhr.status);
+          if (progressToastId) {
+            toast.dismiss(progressToastId);
+          }
+          toast.error(errorMessage);
+          reject(new Error(`Download failed with status ${xhr.status}`));
+        }
+      };
+
+      xhr.onerror = () => {
+        console.error('Network error while downloading file');
+        if (progressToastId) {
+          toast.dismiss(progressToastId);
+        }
+        toast.error(errorMessage);
+        reject(new Error('Network error while downloading file'));
+      };
+
+      xhr.send();
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      if (progressToastId) {
+        toast.dismiss(progressToastId);
+      }
+      toast.error(errorMessage);
+      reject(error instanceof Error ? error : new Error('Unknown download error'));
+    }
+  });
+
+  return downloadPromise;
+};
+
+/**
+ * Downloads a file from a URL using XHR to track progress and shows progress via Sonner toast.
+ * This is a convenience wrapper around downloadFileWithToast for backward compatibility.
+ * 
+ * @param url - The URL of the file to download
+ * @param filename - Optional filename for the download. If not provided, will be extracted from URL
+ * @returns Promise that resolves when download is completed
+ */
+export async function downloadFile(
+  url: string,
+  filename?: string
+): Promise<void> {
+  const downloadFilename = filename || getFileNameFromUrl(url);
+  return downloadFileWithToast({
+    url,
+    fileName: downloadFilename,
+    loadingMessage: `Preparing download...`,
+    successMessage: `Downloaded ${downloadFilename} successfully!`,
+    errorMessage: `Failed to download ${downloadFilename}`,
+  });
+}

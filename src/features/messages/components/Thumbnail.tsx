@@ -1,14 +1,17 @@
 /* eslint-disable @next/next/no-img-element */
 
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DownloadIcon, ExternalLinkIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { MouseEvent, useEffect, useState } from "react";
 import {
   getSpecificFileTypeFromUrl,
   getFileNameFromUrl,
+  downloadFile,
+  getFileTypeDescription,
 } from "@/lib/file-url-utils";
 import { Button } from "@/components/ui/button";
 import { formatFileSize } from "@/lib/file-utils";
+import { Hint } from "@/components/Hint";
 
 interface ThumbnailProps {
   url: string | null | undefined;
@@ -188,6 +191,12 @@ export function Thumbnail({ url, size }: ThumbnailProps) {
 
   const fileName = getFileNameFromUrl(url);
 
+  const handleDownload = async (e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+    await downloadFile(url, fileName);
+  };
+
   if (fileType === "image") {
     return (
       <div className="relative max-w-[360px] my-2 group">
@@ -202,49 +211,39 @@ export function Thumbnail({ url, size }: ThumbnailProps) {
             </div>
           </DialogTrigger>
           <DialogContent className="max-w-[800px] border-none p-0 bg-transparent shadow-none">
+            <DialogTitle className="sr-only">Image preview: {fileName}</DialogTitle>
             <div className="relative">
               <img
                 src={url}
                 alt="Message attachment"
                 className="rounded-md object-cover w-full h-full"
               />
-              <div className="absolute top-2 right-2">
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className="bg-black/70 hover:bg-black/90 text-white"
-                  asChild
-                >
-                  <a
-                    href={url}
-                    download={fileName}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
+              <div className="absolute bottom-2 right-2">
+                <Hint label="Download">
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    className="bg-black/70 hover:bg-black/90 text-white"
+                    onClick={handleDownload}
                   >
                     <DownloadIcon className="size-4" />
-                  </a>
-                </Button>
+                  </Button>
+                </Hint>
               </div>
             </div>
           </DialogContent>
         </Dialog>
         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button
-            variant="secondary"
-            size="icon"
-            className="bg-black/70 hover:bg-black/90 text-white"
-            asChild
-          >
-            <a
-              href={url}
-              download={fileName}
-              target="_blank"
-              rel="noopener noreferrer"
+          <Hint label="Download">
+            <Button
+              variant="secondary"
+              size="icon"
+              className="bg-black/70 hover:bg-black/90 text-white"
+              onClick={handleDownload}
             >
               <DownloadIcon className="size-4" />
-            </a>
-          </Button>
+            </Button>
+          </Hint>
         </div>
       </div>
     );
@@ -266,21 +265,16 @@ export function Thumbnail({ url, size }: ThumbnailProps) {
           </div>
         )}
         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button
-            variant="secondary"
-            size="icon"
-            className="bg-black/70 hover:bg-black/90 text-white"
-            asChild
-          >
-            <a
-              href={url}
-              download={fileName}
-              target="_blank"
-              rel="noopener noreferrer"
+          <Hint label="Download">
+            <Button
+              variant="secondary"
+              size="icon"
+              className="bg-black/70 hover:bg-black/90 text-white"
+              onClick={handleDownload}
             >
               <DownloadIcon className="size-4" />
-            </a>
-          </Button>
+            </Button>
+          </Hint>
         </div>
       </div>
     );
@@ -301,43 +295,34 @@ export function Thumbnail({ url, size }: ThumbnailProps) {
             {fileName}
           </p>
           <p className="text-xs text-slate-500 mt-0.5">
-            {fileType === "pdf" && "PDF Document"}
-            {fileType === "excel" && "Excel Spreadsheet"}
-            {fileType === "word" && "Word Document"}
-            {fileType === "text" && "Text File"}
-            {fileType === "markdown" && "Markdown File"}
-            {fileType === "json" && "JSON File"}
-            {fileType === "csv" && "CSV File"}
-            {fileType === "powerpoint" && "PowerPoint Presentation"}
-            {fileType === "zip" && "ZIP Archive"}
-            {fileType === "other" && "File Attachment"}
+            {getFileTypeDescription(fileType)}
             {fileSize !== null && ` • ${formatFileSize(fileSize)}`}
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <Button variant="ghost" size="icon" className="size-8" asChild>
-            <a
-              href={url}
-              download={fileName}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center"
-              onClick={(e) => e.stopPropagation()}
+          <Hint label="Download">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              onClick={handleDownload}
             >
               <DownloadIcon className="size-4 text-slate-600" />
-            </a>
-          </Button>
-          <Button variant="ghost" size="icon" className="size-8" asChild>
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <ExternalLinkIcon className="size-4 text-slate-600" />
-            </a>
-          </Button>
+            </Button>
+          </Hint>
+          <Hint label="Open">
+            <Button variant="ghost" size="icon" className="size-8" asChild>
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLinkIcon className="size-4 text-slate-600" />
+              </a>
+            </Button>
+          </Hint>
         </div>
       </div>
     </div>
