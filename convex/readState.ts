@@ -169,7 +169,11 @@ export const markChannelAsRead = mutation({
     }
 
     // Get or create read state
-    const readState = await getOrCreateReadState(ctx, member._id, args.channelId);
+    const readState = await getOrCreateReadState(
+      ctx,
+      member._id,
+      args.channelId
+    );
 
     if (!readState) {
       throw new Error("Failed to get or create read state");
@@ -441,5 +445,124 @@ export const getConversationUnreadCounts = query({
     }
 
     return unreadCounts;
+  },
+});
+
+/**
+ * Mark a mention as read for a member
+ * Called when user views a message that mentions them
+ */
+export const markMentionAsRead = mutation({
+  args: {
+    messageId: v.id("messages"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+
+    if (!userId) {
+      throw new Error("Unauthorized");
+    }
+
+    // Get message to find workspace
+    const message = await ctx.db.get(args.messageId);
+    if (!message) {
+      throw new Error("Message not found");
+    }
+
+    // Get current member
+    const member = await getMember(ctx, message.workspaceId, userId);
+    if (!member) {
+      throw new Error("Unauthorized");
+    }
+
+    // Find the mention read state for this message and member
+    const mentionReadState = await ctx.db
+      .query("mentions")
+      .withIndex("by_message_id_mentioned_member_id", (q) =>
+        q.eq("messageId", args.messageId).eq("mentionedMemberId", member._id)
+      )
+      .unique();
+
+    // If mention read state exists and is not already read, mark it as read
+    if (mentionReadState && !mentionReadState.readAt) {
+      await ctx.db.patch(mentionReadState._id, {
+        readAt: Date.now(),
+      });
+    }
+  },
+});
+
+/**
+ * Get unread mention count for a member in a workspace
+ */
+export const getUnreadMentionCount = query({
+  args: {
+    workspaceId: v.id("workspaces"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+
+    if (!userId) {
+      return 0;
+    }
+
+    const member = await getMember(ctx, args.workspaceId, userId);
+    if (!member) {
+      return 0;
+    }
+
+    // Get all mentions for this member, then filter in JavaScript
+    const allMentions = await ctx.db
+      .query("mentions")
+      .withIndex("by_mentioned_member_id", (q) =>
+        q.eq("mentionedMemberId", member._id)
+      )
+      .collect();
+
+    // Filter to unread mentions in this workspace
+    const unreadMentions = allMentions.filter(
+      (mention) => mention.workspaceId === args.workspaceId && !mention.readAt
+    );
+
+    return unreadMentions.length;
+  },
+});
+
+/**
+ * Get all unread mentions for a member in a workspace
+ * Returns array of message IDs that contain unread mentions
+ */
+export const getUnreadMentions = query({
+  args: {
+    workspaceId: v.id("workspaces"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+
+    if (!userId) {
+      return [];
+    }
+
+    const member = await getMember(ctx, args.workspaceId, userId);
+    if (!member) {
+      return [];
+    }
+
+    // Get all mentions for this member, then filter in JavaScript
+    const allMentions = await ctx.db
+      .query("mentions")
+      .withIndex("by_mentioned_member_id", (q) =>
+        q.eq("mentionedMemberId", member._id)
+      )
+      .collect();
+
+    // Filter to unread mentions in this workspace
+    const unreadMentions = allMentions.filter(
+      (mention) => mention.workspaceId === args.workspaceId && !mention.readAt
+    );
+
+    // Return unique message IDs
+    const messageIds = new Set(unreadMentions.map((m) => m.messageId));
+    return Array.from(messageIds);
   },
 });

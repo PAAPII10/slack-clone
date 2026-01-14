@@ -88,9 +88,17 @@ export function useGlobalNotifications() {
         isInCurrentView = message.conversationId === currentConversationId;
       }
 
-      // Only notify if message is NOT in the current view
-      if (!isInCurrentView) {
+      // Phase 5: Check if current user is mentioned in this message
+      const isMentioned = message.mentions?.includes(currentMember._id) ?? false;
+
+      // Notify if:
+      // 1. Message is NOT in the current view, OR
+      // 2. Current user is mentioned (even if in current view, mentions should be highlighted)
+      const shouldNotify = !isInCurrentView || isMentioned;
+
+      if (shouldNotify) {
         // Play sound notification
+        // Phase 5: Always play sound for mentions, even if in current view
         if (soundPrefs?.enabled) {
           playNotificationSound(soundPrefs.soundType, soundPrefs.volume);
         }
@@ -108,7 +116,11 @@ export function useGlobalNotifications() {
             // Get display name (displayName || fullName || name)
             const user = message.user as { name?: string; displayName?: string; fullName?: string };
             const userDisplayName = user.displayName || user.fullName || user.name || "Someone";
-            const title: string = message.channelId
+            
+            // Phase 5: Special title for mentions
+            const title: string = isMentioned
+              ? `${userDisplayName} mentioned you`
+              : message.channelId
               ? `New message in channel`
               : userDisplayName;
             
@@ -124,6 +136,8 @@ export function useGlobalNotifications() {
                 body,
                 icon: message.user.image || undefined,
                 tag: message._id, // Prevent duplicate notifications
+                // Phase 5: Add badge/priority for mentions (if supported)
+                ...(isMentioned && { badge: message.user.image || undefined }),
               });
             });
           }

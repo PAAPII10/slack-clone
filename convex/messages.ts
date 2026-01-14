@@ -245,6 +245,7 @@ export const create = mutation({
     channelId: v.optional(v.id("channels")),
     parentMessageId: v.optional(v.id("messages")),
     conversationId: v.optional(v.id("conversations")),
+    mentions: v.optional(v.array(v.id("members"))), // Phase 5: Array of mentioned member IDs
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
@@ -297,6 +298,24 @@ export const create = mutation({
         messageId,
         member._id
       );
+    }
+
+    // Create mention read states for all mentioned members
+    // Each mention starts as unread (readAt is null)
+    if (args.mentions && args.mentions.length > 0) {
+      for (const mentionedMemberId of args.mentions) {
+        // Skip if the mentioned member is the sender (they already know they mentioned themselves)
+        if (mentionedMemberId === member._id) {
+          continue;
+        }
+
+        await ctx.db.insert("mentions", {
+          messageId,
+          mentionedMemberId,
+          workspaceId: args.workspaceId,
+          // readAt is undefined (null) - meaning unread
+        });
+      }
     }
 
     return messageId;
@@ -766,6 +785,7 @@ export const getRecentForNotifications = query({
           memberId: message.memberId,
           channelId: message.channelId,
           conversationId: message.conversationId,
+          mentions: message.mentions || [], // Phase 5: Include mentions
           _creationTime: message._creationTime,
           user: {
             name: userDisplayName,

@@ -29,6 +29,7 @@ type CreateMessageValue = {
   body: string;
   attachments?: Id<"_storage">[];
   parentMessageId: Id<"messages">;
+  mentions?: Id<"members">[]; // Phase 5: Array of mentioned member IDs
 };
 
 interface ThreadProps {
@@ -68,7 +69,7 @@ export function Thread({ messageId, onClose }: ThreadProps) {
 
   const { mutate: createMessage } = useCreateMessage();
 
-  const onSubmit = async ({ attachments, body }: EditorValue) => {
+  const onSubmit = async ({ attachments, body, mentions }: EditorValue) => {
     try {
       setIsPending(true);
       editorRef.current?.enable(false);
@@ -79,6 +80,7 @@ export function Thread({ messageId, onClose }: ThreadProps) {
         channelId,
         attachments: undefined,
         parentMessageId: messageId,
+        mentions: mentions as Id<"members">[], // Phase 5: Pass mentions from editor
       };
 
       if (attachments && attachments.length > 0) {

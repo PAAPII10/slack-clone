@@ -330,3 +330,65 @@ export const remove = mutation({
     return args.id;
   },
 });
+
+export const getMembersBySourceId = query({
+  args: {
+    conversationId: v.optional(v.id("conversations")),
+    channelId: v.optional(v.id("channels")),
+    workspaceId: v.id("workspaces"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+
+    if (!userId) return null;
+
+    if (!args.conversationId && !args.channelId) return null;
+
+    const currentMember = await ctx.db
+      .query("members")
+      .withIndex("by_workspace_id_user_id", (q) =>
+        q.eq("workspaceId", args.workspaceId).eq("userId", userId)
+      )
+      .unique();
+
+    if (!currentMember) return null;
+
+    const members = [];
+
+    if (args.conversationId) {
+      const conversation = await ctx.db.get(args.conversationId);
+      if (!conversation) return null;
+      for (const memberId of [
+        conversation.memberOneId,
+        conversation.memberTwoId,
+      ]) {
+        const member = await ctx.db.get(memberId);
+        if (!member || !member.userId) continue;
+        const user = await populateUser(ctx, member.userId);
+        if (!user) continue;
+        members.push({
+          ...member,
+          user: user,
+        });
+      }
+    }
+
+    if (args.channelId) {
+      const channelMembers = await ctx.db
+        .query("channelMembers")
+        .withIndex("by_channel_id", (q) => q.eq("channelId", args.channelId!))
+        .collect();
+      for (const channelMember of channelMembers) {
+        const member = await ctx.db.get(channelMember.memberId);
+        if (!member || !member.userId) continue;
+        const user = await populateUser(ctx, member.userId);
+        if (!user) continue;
+        members.push({
+          ...member,
+          user: user,
+        });
+      }
+    }
+    return members;
+  },
+});

@@ -22,6 +22,7 @@ type CreateMessageValue = {
   workspaceId: Id<"workspaces">;
   body: string;
   attachments?: Id<"_storage">[];
+  mentions?: Id<"members">[]; // Phase 5: Array of mentioned member IDs
 };
 
 export function ChatInput({ placeholder, conversationId }: ChatInputProps) {
@@ -38,7 +39,7 @@ export function ChatInput({ placeholder, conversationId }: ChatInputProps) {
 
   const editorRef = useRef<Quill | null>(null);
 
-  const onSubmit = async ({ attachments, body }: EditorValue) => {
+  const onSubmit = async ({ attachments, body, mentions }: EditorValue) => {
     try {
       setIsPending(true);
       editorRef.current?.enable(false);
@@ -48,6 +49,7 @@ export function ChatInput({ placeholder, conversationId }: ChatInputProps) {
         workspaceId,
         conversationId,
         attachments: undefined,
+        mentions: mentions as Id<"members">[], // Phase 5: Pass mentions from editor
       };
 
       if (attachments && attachments.length > 0) {

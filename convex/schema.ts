@@ -43,6 +43,7 @@ const schema = defineSchema({
     channelId: v.optional(v.id("channels")),
     parentMessageId: v.optional(v.id("messages")),
     conversationId: v.optional(v.id("conversations")),
+    mentions: v.optional(v.array(v.id("members"))), // Phase 5: Array of mentioned member IDs
     updatedAt: v.optional(v.number()),
   })
     .index("by_workspace_id", ["workspaceId"])
@@ -122,6 +123,19 @@ const schema = defineSchema({
     .index("by_member_id", ["memberId"])
     .index("by_conversation_id", ["conversationId"])
     .index("by_member_id_conversation_id", ["memberId", "conversationId"]),
+  mentions: defineTable({
+    messageId: v.id("messages"),
+    mentionedMemberId: v.id("members"), // The member who was mentioned
+    workspaceId: v.id("workspaces"),
+    readAt: v.optional(v.number()), // null if unread, timestamp if read
+  })
+    .index("by_message_id", ["messageId"])
+    .index("by_mentioned_member_id", ["mentionedMemberId"])
+    .index("by_workspace_id", ["workspaceId"])
+    .index("by_message_id_mentioned_member_id", [
+      "messageId",
+      "mentionedMemberId",
+    ]),
   userProfiles: defineTable({
     userId: v.id("users"),
     fullName: v.optional(v.string()),

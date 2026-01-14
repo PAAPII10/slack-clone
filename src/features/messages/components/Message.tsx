@@ -14,6 +14,8 @@ import { useToggleReaction } from "@/features/reactions/api/use-toggle-reaction"
 import { Reactions } from "@/features/reactions/components/Reactions";
 import { usePanel } from "@/hooks/use-panel";
 import { ThreadBar } from "./ThreadBar";
+import { useWorkspaceId } from "@/hooks/use-workspace-id";
+import { useCurrentMember } from "@/features/members/api/use-current-member";
 
 const Editor = dynamic(() => import("@/components/Editor"), {
   ssr: false,
@@ -73,6 +75,8 @@ export function Message({
 }: MessageProps) {
   const { parentMessageId, onOpenMessage, onCloseMessage, onOpenProfile } =
     usePanel();
+  const workspaceId = useWorkspaceId();
+  const { data: currentMember } = useCurrentMember({ workspaceId });
   const [ConfirmDialog, confirm] = useConfirm({
     title: "Delete message",
     message:
@@ -165,7 +169,11 @@ export function Message({
               </div>
             ) : (
               <div className="flex flex-col w-full">
-                <Renderer value={body} />
+                <Renderer 
+                  value={body} 
+                  currentMemberId={currentMember?._id}
+                  workspaceId={workspaceId}
+                />
                 {attachments && attachments.length > 0 ? (
                   <div className="flex flex-wrap gap-2 my-2">
                     {attachments.map((attachment, index) => (
@@ -245,7 +253,7 @@ export function Message({
               />
             </div>
           ) : (
-            <div className="flex flex-col w-full overflow-hidden">
+              <div className="flex flex-col w-full overflow-hidden">
               <div className="text-sm">
                 <button
                   className="font-bold text-primary hover:underline cursor-pointer"
@@ -260,7 +268,11 @@ export function Message({
                   </button>
                 </Hint>
               </div>
-              <Renderer value={body} />
+              <Renderer 
+                value={body} 
+                currentMemberId={currentMember?._id}
+                workspaceId={workspaceId}
+              />
               {attachments && attachments.length > 0 ? (
                 <div className="flex flex-wrap gap-2 my-2">
                   {attachments.map((attachment, index) => (

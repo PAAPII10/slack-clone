@@ -17,6 +17,7 @@ type RequestType = {
   channelId?: Id<"channels">;
   parentMessageId?: Id<"messages">;
   conversationId?: Id<"conversations">;
+  mentions?: Id<"members">[]; // Phase 5: Array of mentioned member IDs
 };
 type ResponseType = Id<"messages"> | null;
 

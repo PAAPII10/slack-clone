@@ -5,12 +5,15 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { toast } from "sonner";
 import { Delta, Op } from "quill/core";
 import Quill, { QuillOptions } from "quill";
+import { Mention, MentionBlot } from "quill-mention";
+import "quill-mention/dist/quill.mention.css";
 import { useDropzone, type FileRejection } from "react-dropzone";
 
 import { PiTextAa } from "react-icons/pi";
@@ -25,18 +28,26 @@ import { EmojiPopover } from "./emoji-popover";
 import Image from "next/image";
 import { Id } from "../../convex/_generated/dataModel";
 import { TypingIndicator } from "@/features/typing/components/TypingIndicator";
+import { useGetMemberBySource } from "@/features/members/api/use-get-member-by-source";
+import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import {
   getFileType,
   getSpecificFileType,
   formatFileSize,
 } from "@/lib/file-utils";
 
+// Register both the Mention module and MentionBlot
+Quill.register("modules/mention", Mention);
+Quill.register(MentionBlot);
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
 
 export type EditorValue = {
   attachments: File[];
   body: string;
+  mentions?: string[];
 };
+
 interface EditorProps {
   variant?: "create" | "update";
   placeholder?: string;
@@ -44,12 +55,18 @@ interface EditorProps {
   disabled?: boolean;
   innerRef?: RefObject<Quill | null>;
   onCancel?: () => void;
-  onSubmit: ({ attachments, body }: EditorValue) => void;
+  onSubmit: ({ attachments, body, mentions }: EditorValue) => void;
   onTypingStart?: () => void;
   onTypingStop?: () => void;
   conversationId?: Id<"conversations">;
   channelId?: Id<"channels">;
 }
+
+type MentionItem = {
+  id: string;
+  value: string;
+  image?: string; // Optional image URL for avatar
+};
 
 export default function Editor({
   variant = "create",
@@ -64,9 +81,41 @@ export default function Editor({
   conversationId,
   channelId,
 }: EditorProps) {
-  const [text, setText] = useState("");
+  const workspaceId = useWorkspaceId();
+  const { data: members } = useGetMemberBySource({
+    conversationId,
+    channelId,
+    workspaceId: workspaceId!,
+  });
+
+  // Convert members to MentionItem format
+  const mentionUsers: MentionItem[] = useMemo(() => {
+    if (!members || members.length === 0) return [];
+
+    return members.map((member) => {
+      const user = member.user;
+      const displayName =
+        user?.displayName || user?.fullName || user?.name || "Unknown";
+
+      return {
+        id: member._id, // Use member ID
+        value: displayName,
+        image: user?.image,
+      };
+    });
+  }, [members]);
+
+  // Store mentionUsers in a ref so the source function always has the latest data
+  const mentionUsersRef = useRef<MentionItem[]>(mentionUsers);
+
+  useEffect(() => {
+    mentionUsersRef.current = mentionUsers;
+  }, [mentionUsers]);
+
   const [files, setFiles] = useState<File[]>([]);
   const [isToolbarVisible, setIsToolbarVisible] = useState(true);
+  const [hasEditorContent, setHasEditorContent] = useState(false);
+  const savedSelectionRef = useRef<number | null>(null);
 
   const submitRef = useRef(onSubmit);
   const placeholderRef = useRef(placeholder);
@@ -190,28 +239,110 @@ export default function Editor({
           ["link"],
           [{ list: "ordered" }, { list: "bullet" }],
         ],
+        mention: {
+          allowedChars: /^[A-Za-z\s]*$/,
+          mentionDenotationChars: ["@"],
+          positioningStrategy: "fixed", // Use fixed positioning to avoid clipping
+          defaultMenuOrientation: "bottom", // Show below by default
+          source: function (
+            searchTerm: string,
+            renderList: (data: MentionItem[], searchTerm: string) => void
+          ) {
+            // Use current mentionUsers from ref (always up-to-date)
+            const currentMentionUsers = mentionUsersRef.current;
+            const filtered = currentMentionUsers.filter((user: MentionItem) =>
+              user.value.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+            renderList(filtered, searchTerm);
+          },
+          renderItem: (item: MentionItem) => {
+            // Create a div element with avatar and name - compact design
+            const container = document.createElement("div");
+            container.className = "mention-item-container";
+            container.style.display = "flex";
+            container.style.alignItems = "center";
+            container.style.gap = "8px";
+            container.style.padding = "4px 8px";
+            container.style.minHeight = "28px";
+
+            // Avatar image - smaller size
+            if (item.image) {
+              const avatar = document.createElement("img");
+              avatar.src = item.image;
+              avatar.alt = item.value;
+              avatar.className = "mention-avatar";
+              avatar.style.width = "24px";
+              avatar.style.height = "24px";
+              avatar.style.borderRadius = "50%";
+              avatar.style.objectFit = "cover";
+              avatar.style.flexShrink = "0";
+              container.appendChild(avatar);
+            } else {
+              // Fallback: show initials in a circle
+              const avatarFallback = document.createElement("div");
+              avatarFallback.className = "mention-avatar-fallback";
+              avatarFallback.style.width = "24px";
+              avatarFallback.style.height = "24px";
+              avatarFallback.style.borderRadius = "50%";
+              avatarFallback.style.backgroundColor = "#1264a3";
+              avatarFallback.style.color = "white";
+              avatarFallback.style.display = "flex";
+              avatarFallback.style.alignItems = "center";
+              avatarFallback.style.justifyContent = "center";
+              avatarFallback.style.fontSize = "10px";
+              avatarFallback.style.fontWeight = "600";
+              avatarFallback.style.flexShrink = "0";
+              avatarFallback.textContent = item.value.charAt(0).toUpperCase();
+              container.appendChild(avatarFallback);
+            }
+
+            // Name
+            const name = document.createElement("span");
+            name.className = "mention-name";
+            name.style.fontSize = "14px";
+            name.style.color = "#1d1c1d";
+            name.style.lineHeight = "1.2";
+            name.textContent = item.value;
+            container.appendChild(name);
+
+            return container;
+          },
+          // Custom onSelect to ensure proper data structure
+          // Phase 2: Mentions stored as { insert: { mention: { id, value } } }
+          // Note: quill-mention uses 'value' instead of 'label', but serves the same purpose
+          onSelect: (
+            item: DOMStringMap,
+            insertItem: (data: Record<string, unknown>) => void
+          ) => {
+            // Ensure we're inserting with id and value (label)
+            const mentionData = {
+              id: item.id || "",
+              value: item.value || "", // This is the label/display name
+              denotationChar: "@",
+            };
+            insertItem(mentionData);
+          },
+        },
         keyboard: {
           bindings: {
             enter: {
               key: "Enter",
               handler: () => {
-                const text = quill.getText();
                 const currentFiles = filesRef.current;
+                const messageDelta = quill.getContents();
 
-                const isEmpty =
-                  currentFiles.length === 0 &&
-                  text.replace(/<(.|\n)*?>/g, "").trim().length === 0;
-                if (isEmpty) return;
+                // Phase 2: Check for content including mentions (not just text)
+                if (!checkHasContent(messageDelta, currentFiles)) return;
 
                 // Stop typing when message is sent
                 if (variant === "create" && onTypingStopRef.current) {
                   onTypingStopRef.current();
                 }
-
-                const body = JSON.stringify(quill.getContents());
+                const mentionedUserIds = extractMentions(messageDelta);
                 submitRef.current?.({
                   attachments: currentFiles,
-                  body,
+                  body: JSON.stringify(messageDelta),
+                  mentions: mentionedUserIds,
                 });
               },
             },
@@ -236,7 +367,10 @@ export default function Editor({
     }
 
     quill.setContents(defaultValueRef.current);
-    setText(quill.getText());
+
+    // Phase 2: Initialize content state
+    const initialDelta = quill.getContents();
+    setHasEditorContent(checkHasContent(initialDelta, filesRef.current));
 
     // URL detection regex - matches http, https, www, and common domains
     const urlRegex =
@@ -340,8 +474,12 @@ export default function Editor({
     };
 
     quill.on(Quill.events.TEXT_CHANGE, (_delta, _oldDelta, source) => {
-      setText(quill.getText());
       handleTextChange();
+
+      // Phase 2: Update content state including mentions
+      const delta = quill.getContents();
+      const hasContent = checkHasContent(delta, filesRef.current);
+      setHasEditorContent(hasContent);
 
       // Convert URLs to links when user types (not when programmatically changed)
       if (source === "user") {
@@ -386,15 +524,38 @@ export default function Editor({
     }
   };
 
+  // Save cursor position before emoji popover opens
+  const handleEmojiButtonClick = () => {
+    const quill = quillRef.current;
+    if (quill) {
+      const selection = quill.getSelection();
+      savedSelectionRef.current = selection?.index ?? null;
+    }
+  };
+
   const onEmojiSelect = (emoji: string) => {
     const quill = quillRef.current;
     if (!quill) return;
-    const index = quill.getSelection()?.index || 0;
-    quill.insertText(index, emoji);
+
+    // Get current selection or use saved position
+    const selection = quill.getSelection();
+    const index = selection?.index ?? savedSelectionRef.current ?? 0;
+
+    // Insert emoji at cursor position
+    quill.insertText(index, emoji, "user");
+
+    // Move cursor after the emoji
+    quill.setSelection(index + emoji.length);
+
+    // Focus the editor
+    quill.focus();
+
+    // Clear saved selection
+    savedSelectionRef.current = null;
   };
 
-  const isEmpty =
-    files.length === 0 && text.replace(/<(.|\n)*?>/g, "").trim().length === 0;
+  // Phase 2: Check for content including mentions (not just text)
+  const isEmpty = !hasEditorContent && files.length === 0;
 
   return (
     <div className="flex flex-col" {...getRootProps()}>
@@ -472,7 +633,12 @@ export default function Editor({
             </Button>
           </Hint>
           <EmojiPopover hint="Emoji" onEmojiSelect={onEmojiSelect}>
-            <Button disabled={disabled} size="icon-sm" variant="ghost">
+            <Button
+              disabled={disabled}
+              size="icon-sm"
+              variant="ghost"
+              onClick={handleEmojiButtonClick}
+            >
               <Smile className="size-4" />
             </Button>
           </EmojiPopover>
@@ -504,9 +670,12 @@ export default function Editor({
               <Button
                 size="sm"
                 onClick={() => {
+                  const delta = quillRef.current?.getContents();
+                  const mentionedUserIds = extractMentions(delta);
                   onSubmit({
                     attachments: files,
-                    body: JSON.stringify(quillRef.current?.getContents()),
+                    body: JSON.stringify(delta),
+                    mentions: mentionedUserIds,
                   });
                 }}
                 disabled={disabled || isEmpty}
@@ -531,9 +700,12 @@ export default function Editor({
                 if (onTypingStopRef.current) {
                   onTypingStopRef.current();
                 }
+                const delta = quillRef.current?.getContents();
+                const mentionedUserIds = extractMentions(delta);
                 onSubmit({
                   attachments: files,
-                  body: JSON.stringify(quillRef.current?.getContents()),
+                  body: JSON.stringify(delta),
+                  mentions: mentionedUserIds,
                 });
               }}
             >
@@ -595,4 +767,52 @@ function renderFileIcon(file: File) {
     default:
       return <img src="/file.svg" alt="File" className="size-6" />;
   }
+}
+
+/**
+ * Check if delta has any content (text, mentions, or other embeds)
+ * Phase 2: Accounts for mentions which are embeds, not text
+ */
+function checkHasContent(delta: Delta | undefined, files: File[]): boolean {
+  if (files.length > 0) return true;
+  if (!delta || !delta.ops || delta.ops.length === 0) return false;
+
+  // Check if there's any meaningful content
+  for (const op of delta.ops) {
+    // Check for text content
+    if (typeof op.insert === "string" && op.insert.trim().length > 0) {
+      return true;
+    }
+    // Check for mentions (Phase 2)
+    if (op.insert && typeof op.insert === "object" && "mention" in op.insert) {
+      return true;
+    }
+    // Check for other embeds (images, etc.)
+    if (op.insert && typeof op.insert === "object") {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Phase 2 & 3: Extract mentions from Delta ops
+ * Mentions are stored as: { insert: { mention: { id: string, value: string } } }
+ * Returns array of mention IDs
+ */
+function extractMentions(delta: Delta | undefined): string[] {
+  if (!delta) return [];
+  return (
+    delta.ops
+      ?.filter(
+        (op: Op) =>
+          op.insert && typeof op.insert === "object" && "mention" in op.insert
+      )
+      .map((op: Op) => {
+        const insert = op.insert as { mention: { id: string; value?: string } };
+        // Phase 2: Mentions have id and value (label)
+        return insert.mention.id;
+      }) || []
+  );
 }
