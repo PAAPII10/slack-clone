@@ -181,7 +181,10 @@ export function Profile({ memberId, onClose }: ProfileProps) {
         </div>
         <div className="flex flex-col items-center justify-center p-4">
           <Avatar className="max-w-[256px] max-h-[256px] size-full">
-            <AvatarImage src={member.user.image} />
+            <AvatarImage
+              src={member.user.image}
+              className="aspect-square object-cover"
+            />
             <AvatarFallback className="aspect-square md:text-8xl text-6xl">
               {avatarFallback}
             </AvatarFallback>

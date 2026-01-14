@@ -229,7 +229,9 @@ export function Message({
           >
             <Avatar>
               <AvatarImage src={authorImage} />
-              <AvatarFallback>{avatarFallback}</AvatarFallback>
+              <AvatarFallback className="text-xs">
+                {avatarFallback}
+              </AvatarFallback>
             </Avatar>
           </button>
           {isEditing ? (
