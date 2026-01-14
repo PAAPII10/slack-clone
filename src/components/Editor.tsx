@@ -100,7 +100,7 @@ export default function Editor({
       return {
         id: member._id, // Use member ID
         value: displayName,
-        image: user?.image,
+        image: user?.image || undefined,
       };
     });
   }, [members]);
@@ -265,7 +265,24 @@ export default function Editor({
             container.style.padding = "4px 8px";
             container.style.minHeight = "28px";
 
-            // Avatar image - smaller size
+            // Helper function to get initials from name
+            const getInitials = (name: string): string => {
+              if (!name || name.trim().length === 0) return "?";
+              const parts = name.trim().split(/\s+/);
+              if (parts.length === 1) {
+                return parts[0].charAt(0).toUpperCase();
+              }
+              // Get first letter of first name and first letter of last name
+              return parts[0].charAt(0).charAt(0).toUpperCase();
+            };
+
+            // Avatar - always show fallback if image is missing or fails to load
+            const avatarWrapper = document.createElement("div");
+            avatarWrapper.style.position = "relative";
+            avatarWrapper.style.width = "24px";
+            avatarWrapper.style.height = "24px";
+            avatarWrapper.style.flexShrink = "0";
+
             if (item.image) {
               const avatar = document.createElement("img");
               avatar.src = item.image;
@@ -275,26 +292,44 @@ export default function Editor({
               avatar.style.height = "24px";
               avatar.style.borderRadius = "50%";
               avatar.style.objectFit = "cover";
-              avatar.style.flexShrink = "0";
-              container.appendChild(avatar);
-            } else {
-              // Fallback: show initials in a circle
-              const avatarFallback = document.createElement("div");
-              avatarFallback.className = "mention-avatar-fallback";
-              avatarFallback.style.width = "24px";
-              avatarFallback.style.height = "24px";
-              avatarFallback.style.borderRadius = "50%";
-              avatarFallback.style.backgroundColor = "#1264a3";
-              avatarFallback.style.color = "white";
-              avatarFallback.style.display = "flex";
-              avatarFallback.style.alignItems = "center";
-              avatarFallback.style.justifyContent = "center";
-              avatarFallback.style.fontSize = "10px";
-              avatarFallback.style.fontWeight = "600";
-              avatarFallback.style.flexShrink = "0";
-              avatarFallback.textContent = item.value.charAt(0).toUpperCase();
-              container.appendChild(avatarFallback);
+              avatar.style.display = "block";
+
+              // Show fallback if image fails to load
+              avatar.onerror = () => {
+                avatar.style.display = "none";
+                const fallback = avatarWrapper.querySelector(
+                  ".mention-avatar-fallback"
+                ) as HTMLElement;
+                if (fallback) {
+                  fallback.style.display = "flex";
+                }
+              };
+
+              avatarWrapper.appendChild(avatar);
             }
+
+            // Fallback: show initials in a circle (always create, show if no image or image fails)
+            const avatarFallback = document.createElement("div");
+            avatarFallback.className = "mention-avatar-fallback";
+            avatarFallback.style.width = "24px";
+            avatarFallback.style.height = "24px";
+            avatarFallback.style.borderRadius = "50%";
+            avatarFallback.style.backgroundColor = "#1264a3";
+            avatarFallback.style.color = "white";
+            avatarFallback.style.display = item.image ? "none" : "flex";
+            avatarFallback.style.alignItems = "center";
+            avatarFallback.style.justifyContent = "center";
+            avatarFallback.style.fontSize = "10px";
+            avatarFallback.style.fontWeight = "600";
+            avatarFallback.style.position = item.image
+              ? "absolute"
+              : "relative";
+            avatarFallback.style.top = item.image ? "0" : "auto";
+            avatarFallback.style.left = item.image ? "0" : "auto";
+            avatarFallback.textContent = getInitials(item.value);
+            avatarWrapper.appendChild(avatarFallback);
+
+            container.appendChild(avatarWrapper);
 
             // Name
             const name = document.createElement("span");
@@ -495,6 +530,58 @@ export default function Editor({
       }
     });
 
+    // Close mention popup helper function
+    const closeMentionPopup = () => {
+      const mentionContainer = document.querySelector(
+        ".ql-mention-list-container"
+      ) as HTMLElement | null;
+      if (mentionContainer) {
+        mentionContainer.style.display = "none";
+      }
+    };
+
+    // Handle Escape key to close mention popup
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        const mentionContainer = document.querySelector(
+          ".ql-mention-list-container"
+        ) as HTMLElement | null;
+        if (mentionContainer && mentionContainer.style.display !== "none") {
+          closeMentionPopup();
+          // Blur editor to remove focus
+          if (quillRef.current) {
+            quillRef.current.blur();
+          }
+        }
+      }
+    };
+
+    // Handle clicks outside mention popup to close it
+    const handleClickOutside = (e: MouseEvent) => {
+      const mentionContainer = document.querySelector(
+        ".ql-mention-list-container"
+      ) as HTMLElement | null;
+      
+      if (mentionContainer && mentionContainer.style.display !== "none") {
+        // Check if click is outside the mention container and editor
+        const target = e.target as HTMLElement;
+        const editorElement = editorContainer.querySelector(".ql-editor") as HTMLElement | null;
+        
+        if (
+          mentionContainer &&
+          !mentionContainer.contains(target) &&
+          editorElement &&
+          !editorElement.contains(target)
+        ) {
+          closeMentionPopup();
+        }
+      }
+    };
+
+    // Add event listeners
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("mousedown", handleClickOutside);
+
     return () => {
       quill.off(Quill.events.TEXT_CHANGE);
       const editorElement = editorContainer.querySelector(
@@ -503,6 +590,14 @@ export default function Editor({
       if (editorElement) {
         editorElement.removeEventListener("paste", handlePaste, true);
       }
+
+      // Remove event listeners
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("mousedown", handleClickOutside);
+
+      // Close mention popup if it's open
+      closeMentionPopup();
+
       if (container) {
         container.innerHTML = "";
       }
