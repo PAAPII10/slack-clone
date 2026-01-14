@@ -355,6 +355,23 @@ export const getMembersBySourceId = query({
 
     const members = [];
 
+    if (args.channelId) {
+      const channelMembers = await ctx.db
+        .query("channelMembers")
+        .withIndex("by_channel_id", (q) => q.eq("channelId", args.channelId!))
+        .collect();
+      for (const channelMember of channelMembers) {
+        const member = await ctx.db.get(channelMember.memberId);
+        if (!member || !member.userId) continue;
+        const user = await populateUser(ctx, member.userId);
+        if (!user) continue;
+        members.push({
+          ...member,
+          user: user,
+        });
+      }
+    }
+
     if (args.conversationId) {
       const conversation = await ctx.db.get(args.conversationId);
       if (!conversation) return null;
@@ -373,22 +390,6 @@ export const getMembersBySourceId = query({
       }
     }
 
-    if (args.channelId) {
-      const channelMembers = await ctx.db
-        .query("channelMembers")
-        .withIndex("by_channel_id", (q) => q.eq("channelId", args.channelId!))
-        .collect();
-      for (const channelMember of channelMembers) {
-        const member = await ctx.db.get(channelMember.memberId);
-        if (!member || !member.userId) continue;
-        const user = await populateUser(ctx, member.userId);
-        if (!user) continue;
-        members.push({
-          ...member,
-          user: user,
-        });
-      }
-    }
     return members;
   },
 });

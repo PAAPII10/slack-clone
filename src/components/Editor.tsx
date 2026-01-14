@@ -35,6 +35,7 @@ import {
   getSpecificFileType,
   formatFileSize,
 } from "@/lib/file-utils";
+import { useChannelId } from "@/hooks/use-channel-id";
 
 // Register both the Mention module and MentionBlot
 Quill.register("modules/mention", Mention);
@@ -59,7 +60,6 @@ interface EditorProps {
   onTypingStart?: () => void;
   onTypingStop?: () => void;
   conversationId?: Id<"conversations">;
-  channelId?: Id<"channels">;
 }
 
 type MentionItem = {
@@ -79,13 +79,14 @@ export default function Editor({
   onTypingStart,
   onTypingStop,
   conversationId,
-  channelId,
 }: EditorProps) {
   const workspaceId = useWorkspaceId();
+  const channelId = useChannelId();
+
   const { data: members } = useGetMemberBySource({
     conversationId,
     channelId,
-    workspaceId: workspaceId!,
+    workspaceId,
   });
 
   // Convert members to MentionItem format
@@ -230,6 +231,9 @@ export default function Editor({
       container.ownerDocument.createElement("div")
     );
 
+    // Only include mention module if we have channelId or conversationId
+    const hasMentionSource = !!(channelId || conversationId);
+
     const options: QuillOptions = {
       theme: "snow",
       placeholder: placeholderRef.current,
@@ -239,125 +243,127 @@ export default function Editor({
           ["link"],
           [{ list: "ordered" }, { list: "bullet" }],
         ],
-        mention: {
-          allowedChars: /^[A-Za-z\s]*$/,
-          mentionDenotationChars: ["@"],
-          positioningStrategy: "fixed", // Use fixed positioning to avoid clipping
-          defaultMenuOrientation: "bottom", // Show below by default
-          source: function (
-            searchTerm: string,
-            renderList: (data: MentionItem[], searchTerm: string) => void
-          ) {
-            // Use current mentionUsers from ref (always up-to-date)
-            const currentMentionUsers = mentionUsersRef.current;
-            const filtered = currentMentionUsers.filter((user: MentionItem) =>
-              user.value.toLowerCase().includes(searchTerm.toLowerCase())
-            );
-            renderList(filtered, searchTerm);
-          },
-          renderItem: (item: MentionItem) => {
-            // Create a div element with avatar and name - compact design
-            const container = document.createElement("div");
-            container.className = "mention-item-container";
-            container.style.display = "flex";
-            container.style.alignItems = "center";
-            container.style.gap = "8px";
-            container.style.padding = "4px 8px";
-            container.style.minHeight = "28px";
+        ...(hasMentionSource && {
+          mention: {
+            allowedChars: /^[A-Za-z\s]*$/,
+            mentionDenotationChars: ["@"],
+            positioningStrategy: "fixed", // Use fixed positioning to avoid clipping
+            defaultMenuOrientation: "bottom", // Show below by default
+            source: function (
+              searchTerm: string,
+              renderList: (data: MentionItem[], searchTerm: string) => void
+            ) {
+              // Use current mentionUsers from ref (always up-to-date)
+              const currentMentionUsers = mentionUsersRef.current;
+              const filtered = currentMentionUsers.filter((user: MentionItem) =>
+                user.value.toLowerCase().includes(searchTerm.toLowerCase())
+              );
+              renderList(filtered, searchTerm);
+            },
+            renderItem: (item: MentionItem) => {
+              // Create a div element with avatar and name - compact design
+              const container = document.createElement("div");
+              container.className = "mention-item-container";
+              container.style.display = "flex";
+              container.style.alignItems = "center";
+              container.style.gap = "8px";
+              container.style.padding = "4px 8px";
+              container.style.minHeight = "28px";
 
-            // Helper function to get initials from name
-            const getInitials = (name: string): string => {
-              if (!name || name.trim().length === 0) return "?";
-              const parts = name.trim().split(/\s+/);
-              if (parts.length === 1) {
-                return parts[0].charAt(0).toUpperCase();
-              }
-              // Get first letter of first name and first letter of last name
-              return parts[0].charAt(0).charAt(0).toUpperCase();
-            };
-
-            // Avatar - always show fallback if image is missing or fails to load
-            const avatarWrapper = document.createElement("div");
-            avatarWrapper.style.position = "relative";
-            avatarWrapper.style.width = "24px";
-            avatarWrapper.style.height = "24px";
-            avatarWrapper.style.flexShrink = "0";
-
-            if (item.image) {
-              const avatar = document.createElement("img");
-              avatar.src = item.image;
-              avatar.alt = item.value;
-              avatar.className = "mention-avatar";
-              avatar.style.width = "24px";
-              avatar.style.height = "24px";
-              avatar.style.borderRadius = "50%";
-              avatar.style.objectFit = "cover";
-              avatar.style.display = "block";
-
-              // Show fallback if image fails to load
-              avatar.onerror = () => {
-                avatar.style.display = "none";
-                const fallback = avatarWrapper.querySelector(
-                  ".mention-avatar-fallback"
-                ) as HTMLElement;
-                if (fallback) {
-                  fallback.style.display = "flex";
+              // Helper function to get initials from name
+              const getInitials = (name: string): string => {
+                if (!name || name.trim().length === 0) return "?";
+                const parts = name.trim().split(/\s+/);
+                if (parts.length === 1) {
+                  return parts[0].charAt(0).toUpperCase();
                 }
+                // Get first letter of first name and first letter of last name
+                return parts[0].charAt(0).charAt(0).toUpperCase();
               };
 
-              avatarWrapper.appendChild(avatar);
-            }
+              // Avatar - always show fallback if image is missing or fails to load
+              const avatarWrapper = document.createElement("div");
+              avatarWrapper.style.position = "relative";
+              avatarWrapper.style.width = "24px";
+              avatarWrapper.style.height = "24px";
+              avatarWrapper.style.flexShrink = "0";
 
-            // Fallback: show initials in a circle (always create, show if no image or image fails)
-            const avatarFallback = document.createElement("div");
-            avatarFallback.className = "mention-avatar-fallback";
-            avatarFallback.style.width = "24px";
-            avatarFallback.style.height = "24px";
-            avatarFallback.style.borderRadius = "50%";
-            avatarFallback.style.backgroundColor = "#1264a3";
-            avatarFallback.style.color = "white";
-            avatarFallback.style.display = item.image ? "none" : "flex";
-            avatarFallback.style.alignItems = "center";
-            avatarFallback.style.justifyContent = "center";
-            avatarFallback.style.fontSize = "10px";
-            avatarFallback.style.fontWeight = "600";
-            avatarFallback.style.position = item.image
-              ? "absolute"
-              : "relative";
-            avatarFallback.style.top = item.image ? "0" : "auto";
-            avatarFallback.style.left = item.image ? "0" : "auto";
-            avatarFallback.textContent = getInitials(item.value);
-            avatarWrapper.appendChild(avatarFallback);
+              if (item.image) {
+                const avatar = document.createElement("img");
+                avatar.src = item.image;
+                avatar.alt = item.value;
+                avatar.className = "mention-avatar";
+                avatar.style.width = "24px";
+                avatar.style.height = "24px";
+                avatar.style.borderRadius = "50%";
+                avatar.style.objectFit = "cover";
+                avatar.style.display = "block";
 
-            container.appendChild(avatarWrapper);
+                // Show fallback if image fails to load
+                avatar.onerror = () => {
+                  avatar.style.display = "none";
+                  const fallback = avatarWrapper.querySelector(
+                    ".mention-avatar-fallback"
+                  ) as HTMLElement;
+                  if (fallback) {
+                    fallback.style.display = "flex";
+                  }
+                };
 
-            // Name
-            const name = document.createElement("span");
-            name.className = "mention-name";
-            name.style.fontSize = "14px";
-            name.style.color = "#1d1c1d";
-            name.style.lineHeight = "1.2";
-            name.textContent = item.value;
-            container.appendChild(name);
+                avatarWrapper.appendChild(avatar);
+              }
 
-            return container;
+              // Fallback: show initials in a circle (always create, show if no image or image fails)
+              const avatarFallback = document.createElement("div");
+              avatarFallback.className = "mention-avatar-fallback";
+              avatarFallback.style.width = "24px";
+              avatarFallback.style.height = "24px";
+              avatarFallback.style.borderRadius = "50%";
+              avatarFallback.style.backgroundColor = "#1264a3";
+              avatarFallback.style.color = "white";
+              avatarFallback.style.display = item.image ? "none" : "flex";
+              avatarFallback.style.alignItems = "center";
+              avatarFallback.style.justifyContent = "center";
+              avatarFallback.style.fontSize = "10px";
+              avatarFallback.style.fontWeight = "600";
+              avatarFallback.style.position = item.image
+                ? "absolute"
+                : "relative";
+              avatarFallback.style.top = item.image ? "0" : "auto";
+              avatarFallback.style.left = item.image ? "0" : "auto";
+              avatarFallback.textContent = getInitials(item.value);
+              avatarWrapper.appendChild(avatarFallback);
+
+              container.appendChild(avatarWrapper);
+
+              // Name
+              const name = document.createElement("span");
+              name.className = "mention-name";
+              name.style.fontSize = "14px";
+              name.style.color = "#1d1c1d";
+              name.style.lineHeight = "1.2";
+              name.textContent = item.value;
+              container.appendChild(name);
+
+              return container;
+            },
+            // Custom onSelect to ensure proper data structure
+            // Phase 2: Mentions stored as { insert: { mention: { id, value } } }
+            // Note: quill-mention uses 'value' instead of 'label', but serves the same purpose
+            onSelect: (
+              item: DOMStringMap,
+              insertItem: (data: Record<string, unknown>) => void
+            ) => {
+              // Ensure we're inserting with id and value (label)
+              const mentionData = {
+                id: item.id || "",
+                value: item.value || "", // This is the label/display name
+                denotationChar: "@",
+              };
+              insertItem(mentionData);
+            },
           },
-          // Custom onSelect to ensure proper data structure
-          // Phase 2: Mentions stored as { insert: { mention: { id, value } } }
-          // Note: quill-mention uses 'value' instead of 'label', but serves the same purpose
-          onSelect: (
-            item: DOMStringMap,
-            insertItem: (data: Record<string, unknown>) => void
-          ) => {
-            // Ensure we're inserting with id and value (label)
-            const mentionData = {
-              id: item.id || "",
-              value: item.value || "", // This is the label/display name
-              denotationChar: "@",
-            };
-            insertItem(mentionData);
-          },
-        },
+        }),
         keyboard: {
           bindings: {
             enter: {
@@ -561,12 +567,14 @@ export default function Editor({
       const mentionContainer = document.querySelector(
         ".ql-mention-list-container"
       ) as HTMLElement | null;
-      
+
       if (mentionContainer && mentionContainer.style.display !== "none") {
         // Check if click is outside the mention container and editor
         const target = e.target as HTMLElement;
-        const editorElement = editorContainer.querySelector(".ql-editor") as HTMLElement | null;
-        
+        const editorElement = editorContainer.querySelector(
+          ".ql-editor"
+        ) as HTMLElement | null;
+
         if (
           mentionContainer &&
           !mentionContainer.contains(target) &&
@@ -608,7 +616,7 @@ export default function Editor({
         innerRef.current = null;
       }
     };
-  }, [innerRef, variant]);
+  }, [innerRef, variant, channelId, conversationId, mentionUsers]);
 
   const toggleToolbar = () => {
     setIsToolbarVisible((prev) => !prev);

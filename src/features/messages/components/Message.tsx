@@ -50,6 +50,7 @@ interface MessageProps {
   threadCount?: number;
   threadImage?: string;
   threadTimestamp?: number;
+  conversationId?: Id<"conversations">;
 }
 
 export function Message({
@@ -72,11 +73,14 @@ export function Message({
   threadCount,
   threadImage,
   threadTimestamp,
+  conversationId,
 }: MessageProps) {
   const { parentMessageId, onOpenMessage, onCloseMessage, onOpenProfile } =
     usePanel();
   const workspaceId = useWorkspaceId();
+
   const { data: currentMember } = useCurrentMember({ workspaceId });
+
   const [ConfirmDialog, confirm] = useConfirm({
     title: "Delete message",
     message:
@@ -103,9 +107,15 @@ export function Message({
     );
   };
 
-  const handleUpdate = ({ body }: { body: string }) => {
+  const handleUpdate = ({
+    body,
+    mentions,
+  }: {
+    body: string;
+    mentions?: string[];
+  }) => {
     updateMessage(
-      { id, body },
+      { id, body, mentions: mentions as Id<"members">[] | undefined },
       {
         onSuccess: () => {
           toast.success("Message updated");
@@ -165,12 +175,13 @@ export function Message({
                   defaultValue={JSON.parse(body)}
                   onCancel={() => setEditingId(null)}
                   onSubmit={handleUpdate}
+                  conversationId={conversationId}
                 />
               </div>
             ) : (
               <div className="flex flex-col w-full">
-                <Renderer 
-                  value={body} 
+                <Renderer
+                  value={body}
                   currentMemberId={currentMember?._id}
                   workspaceId={workspaceId}
                 />
@@ -250,10 +261,11 @@ export function Message({
                 defaultValue={JSON.parse(body)}
                 onCancel={() => setEditingId(null)}
                 onSubmit={handleUpdate}
+                conversationId={conversationId}
               />
             </div>
           ) : (
-              <div className="flex flex-col w-full overflow-hidden">
+            <div className="flex flex-col w-full overflow-hidden">
               <div className="text-sm">
                 <button
                   className="font-bold text-primary hover:underline cursor-pointer"
@@ -268,8 +280,8 @@ export function Message({
                   </button>
                 </Hint>
               </div>
-              <Renderer 
-                value={body} 
+              <Renderer
+                value={body}
                 currentMemberId={currentMember?._id}
                 workspaceId={workspaceId}
               />

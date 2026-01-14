@@ -5,7 +5,6 @@ import { Plus } from "lucide-react";
 import { ReactNode } from "react";
 import { FaCaretDown } from "react-icons/fa";
 import { cn } from "@/lib/utils";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface WorkspaceSectionProps {
   defaultOpen?: boolean;
@@ -58,9 +57,9 @@ export function WorkspaceSection({
         )}
       </div>
       {on && (
-        <ScrollArea className={cn("max-h-[250px]", className)}>
+        <div className={className}>
           {children}
-        </ScrollArea>
+        </div>
       )}
     </div>
   );

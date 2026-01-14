@@ -24,6 +24,7 @@ interface MessagesListProps {
   loadMore: () => void;
   isLoadingMore: boolean;
   canLoadMore: boolean;
+  conversationId?: Id<"conversations">;
 }
 
 export function MessagesList({
@@ -37,6 +38,7 @@ export function MessagesList({
   loadMore,
   isLoadingMore,
   canLoadMore,
+  conversationId,
 }: MessagesListProps) {
   const workspaceId = useWorkspaceId();
 
@@ -145,6 +147,7 @@ export function MessagesList({
                 threadCount={message.threadCount}
                 threadImage={message.threadImage}
                 threadTimestamp={message.threadTimestamp}
+                conversationId={conversationId}
               />
             );
           })}

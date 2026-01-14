@@ -25,6 +25,7 @@ import { useRouter } from "next/navigation";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { getUserDisplayName } from "@/lib/user-utils";
 import { HuddleCall } from "@/features/huddle/components/HuddleCall";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 function ChannelItem({
   channel,
@@ -128,84 +129,85 @@ export function WorkspaceSidebar() {
 
   return (
     <div className="flex flex-col bg-[#5E2C5F] h-full">
-      <WorkspaceHeader
-        workspace={workspace}
-        isAdmin={member.role === "admin"}
-      />
-      <div className="flex flex-col px-2 mt-3">
-        <SidebarItem
-          label="Threads"
-          icon={MessageSquareText}
-          id="threads"
-          href={`/workspace/${workspaceId}/threads`}
+      <ScrollArea className="flex-1">
+        <WorkspaceHeader
+          workspace={workspace}
+          isAdmin={member.role === "admin"}
         />
+        <div className="flex flex-col px-2 mt-3">
+          <SidebarItem
+            label="Threads"
+            icon={MessageSquareText}
+            id="threads"
+            href={`/workspace/${workspaceId}/threads`}
+          />
 
-        <SidebarItem
-          label="Drafts & Sent"
-          icon={SendHorizontal}
-          id="drafts"
-          href={`/workspace/${workspaceId}/drafts`}
-        />
-      </div>
-      <WorkspaceSection
-        label="Channels"
-        hint="New channel"
-        onNew={() => setOpen(true)}
-        defaultOpen
-      >
-        {[...channels]
-          .sort((a, b) => {
-            // Sort by unread count (unread channels first)
-            const aUnread = a.unreadCount ?? 0;
-            const bUnread = b.unreadCount ?? 0;
-            if (aUnread !== bUnread) {
-              return bUnread - aUnread; // Higher unread count first
-            }
-            // If unread counts are equal, maintain original order (by name)
-            return a.name.localeCompare(b.name);
-          })
-          .map((item) => (
-            <ChannelItem
-              key={`${item._id}-${item.channelType}`}
-              channel={item}
-              currentChannelId={channelId}
-              onJoin={handleJoinChannel}
-              isJoining={isJoining}
-            />
-          ))}
-      </WorkspaceSection>
-      <WorkspaceSection
-        label="Direct Messages"
-        hint="New direct message"
-        defaultOpen
-        className="max-h-[400px]"
-      >
-        {[...(members || [])]
-          .sort((a, b) => {
-            // Sort by unread count (unread conversations first)
-            const aUnread = a.unreadCount ?? 0;
-            const bUnread = b.unreadCount ?? 0;
-            if (aUnread !== bUnread) {
-              return bUnread - aUnread; // Higher unread count first
-            }
-            // If unread counts are equal, maintain original order (by name)
-            const aName = getUserDisplayName(a.user);
-            const bName = getUserDisplayName(b.user);
-            return aName.localeCompare(bName);
-          })
-          .map((item) => (
-            <UserItem
-              key={item._id}
-              id={item._id}
-              label={getUserDisplayName(item.user)}
-              image={item.user.image}
-              variant={memberId === item._id ? "active" : "default"}
-              unreadCount={item.unreadCount ?? 0}
-              isActive={memberId === item._id}
-            />
-          ))}
-      </WorkspaceSection>
-      <div className="mt-auto">
+          <SidebarItem
+            label="Drafts & Sent"
+            icon={SendHorizontal}
+            id="drafts"
+            href={`/workspace/${workspaceId}/drafts`}
+          />
+        </div>
+        <WorkspaceSection
+          label="Channels"
+          hint="New channel"
+          onNew={() => setOpen(true)}
+          defaultOpen
+        >
+          {[...channels]
+            .sort((a, b) => {
+              // Sort by unread count (unread channels first)
+              const aUnread = a.unreadCount ?? 0;
+              const bUnread = b.unreadCount ?? 0;
+              if (aUnread !== bUnread) {
+                return bUnread - aUnread; // Higher unread count first
+              }
+              // If unread counts are equal, maintain original order (by name)
+              return a.name.localeCompare(b.name);
+            })
+            .map((item) => (
+              <ChannelItem
+                key={`${item._id}-${item.channelType}`}
+                channel={item}
+                currentChannelId={channelId}
+                onJoin={handleJoinChannel}
+                isJoining={isJoining}
+              />
+            ))}
+        </WorkspaceSection>
+        <WorkspaceSection
+          label="Direct Messages"
+          hint="New direct message"
+          defaultOpen
+        >
+          {[...(members || [])]
+            .sort((a, b) => {
+              // Sort by unread count (unread conversations first)
+              const aUnread = a.unreadCount ?? 0;
+              const bUnread = b.unreadCount ?? 0;
+              if (aUnread !== bUnread) {
+                return bUnread - aUnread; // Higher unread count first
+              }
+              // If unread counts are equal, maintain original order (by name)
+              const aName = getUserDisplayName(a.user);
+              const bName = getUserDisplayName(b.user);
+              return aName.localeCompare(bName);
+            })
+            .map((item) => (
+              <UserItem
+                key={item._id}
+                id={item._id}
+                label={getUserDisplayName(item.user)}
+                image={item.user.image}
+                variant={memberId === item._id ? "active" : "default"}
+                unreadCount={item.unreadCount ?? 0}
+                isActive={memberId === item._id}
+              />
+            ))}
+        </WorkspaceSection>
+      </ScrollArea>
+      <div className="shrink-0">
         <HuddleCall />
       </div>
     </div>

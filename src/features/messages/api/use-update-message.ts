@@ -13,6 +13,7 @@ type Options = {
 type RequestType = {
   body: string;
   id: Id<"messages">;
+  mentions?: Id<"members">[];
 };
 type ResponseType = Id<"messages"> | null;
 

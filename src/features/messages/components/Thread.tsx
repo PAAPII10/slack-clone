@@ -223,6 +223,7 @@ export function Thread({ messageId, onClose }: ThreadProps) {
                   threadCount={message.threadCount}
                   threadImage={message.threadImage}
                   threadTimestamp={message.threadTimestamp}
+                  conversationId={message.conversationId}
                 />
               );
             })}
@@ -268,6 +269,7 @@ export function Thread({ messageId, onClose }: ThreadProps) {
           reactions={message.reactions}
           isEditing={editingId === message._id}
           setEditingId={setEditingId}
+          conversationId={message.conversationId}
         />
       </div>
       <div className="px-4">
@@ -277,6 +279,7 @@ export function Thread({ messageId, onClose }: ThreadProps) {
           placeholder="Reply.."
           disabled={isPending}
           onSubmit={onSubmit}
+          conversationId={message.conversationId}
         />
       </div>
     </div>

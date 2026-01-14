@@ -91,6 +91,7 @@ export function Conversation({ id }: ConversationProps) {
         memberImage={member?.user.image}
         isLoadingMore={status === "LoadingMore"}
         canLoadMore={status === "CanLoadMore"}
+        conversationId={id}
       />
       <ChatInput conversationId={id} placeholder={`Message ${displayName}`} />
     </div>

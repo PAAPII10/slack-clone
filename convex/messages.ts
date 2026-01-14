@@ -491,6 +491,7 @@ export const update = mutation({
   args: {
     id: v.id("messages"),
     body: v.optional(v.string()),
+    mentions: v.optional(v.array(v.id("members"))), // Phase 5: Array of mentioned member IDs
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
@@ -511,7 +512,43 @@ export const update = mutation({
       throw new Error("Unauthorized");
     }
 
-    await ctx.db.patch(args.id, { body: args.body, updatedAt: Date.now() });
+    // Update message body and mentions
+    await ctx.db.patch(args.id, { 
+      body: args.body, 
+      mentions: args.mentions,
+      updatedAt: Date.now() 
+    });
+
+    // Update mentions table: delete old mentions and create new ones
+    if (args.mentions !== undefined) {
+      // Delete all existing mentions for this message
+      const existingMentions = await ctx.db
+        .query("mentions")
+        .withIndex("by_message_id", (q) => q.eq("messageId", args.id))
+        .collect();
+      
+      for (const mention of existingMentions) {
+        await ctx.db.delete(mention._id);
+      }
+
+      // Create new mention read states for all mentioned members
+      // Each mention starts as unread (readAt is null)
+      if (args.mentions.length > 0) {
+        for (const mentionedMemberId of args.mentions) {
+          // Skip if the mentioned member is the sender (they already know they mentioned themselves)
+          if (mentionedMemberId === member._id) {
+            continue;
+          }
+
+          await ctx.db.insert("mentions", {
+            messageId: args.id,
+            mentionedMemberId,
+            workspaceId: message.workspaceId,
+            // readAt is undefined (null) - meaning unread
+          });
+        }
+      }
+    }
 
     return args.id;
   },
