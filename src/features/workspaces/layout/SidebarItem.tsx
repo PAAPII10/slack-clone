@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
-import { LucideIcon, Plus } from "lucide-react";
+import { LucideIcon, Plus, Headphones } from "lucide-react";
 import Link from "next/link";
 import { IconType } from "react-icons/lib";
 import { cva, type VariantProps } from "class-variance-authority";
@@ -16,6 +16,7 @@ interface SidebarItemProps {
   onJoin?: () => void;
   isJoining?: boolean;
   unreadCount?: number;
+  hasActiveHuddle?: boolean;
 }
 
 const sidebarItemVariants = cva(
@@ -43,6 +44,7 @@ export function SidebarItem({
   onJoin,
   isJoining,
   unreadCount = 0,
+  hasActiveHuddle = false,
 }: SidebarItemProps) {
   const workspaceId = useWorkspaceId();
   const hasUnread = unreadCount > 0;
@@ -72,6 +74,12 @@ export function SidebarItem({
           )}
           <Icon className="size-3.5 mr-1 shrink-0" />
           <span className="text-sm truncate flex-1">{label}</span>
+          {/* Active huddle indicator - shows before unread count */}
+          {hasActiveHuddle && (
+            <div title="Active huddle" className="shrink-0">
+              <Headphones className="size-3.5 ml-1 text-green-400" />
+            </div>
+          )}
           {/* Unread count badge - positioned on the right like Slack */}
           {hasUnread && unreadCount > 0 && (
             <span className="ml-auto mr-0 bg-white text-[#481349] text-[11px] font-semibold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-tight shrink-0">

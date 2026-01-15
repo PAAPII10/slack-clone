@@ -11,6 +11,7 @@ import { playHuddleSound } from "@/lib/huddle-sounds";
 import { SoundPreferences } from "@/hooks/use-sound-preferences";
 import { useGetMember } from "@/features/members/api/use-get-member";
 import { getUserDisplayName } from "@/lib/user-utils";
+import { logger } from "@/lib/logger";
 
 /**
  * Hook to monitor huddles and send notifications when:
@@ -83,14 +84,14 @@ export function useHuddleNotifications() {
 
     // Play incoming call sound
     if (effectiveSoundPrefs.enabled) {
-      console.log("[HuddleNotifications] Playing incoming call sound", {
+      logger.debug("[HuddleNotifications] Playing incoming call sound", {
         enabled: effectiveSoundPrefs.enabled,
         volume: effectiveSoundPrefs.volume,
         huddleId: incomingHuddle._id,
       });
       playHuddleSound("incoming_call", effectiveSoundPrefs.volume);
     } else {
-      console.log(
+      logger.debug(
         "[HuddleNotifications] Sound disabled, skipping incoming call sound",
         {
           enabled: effectiveSoundPrefs.enabled,

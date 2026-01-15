@@ -4,7 +4,7 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { useState, useCallback, useMemo } from "react";
 
 interface UseLeaveHuddleOptions {
-  onSuccess?: () => void;
+  onSuccess?: (response: { huddleId: Id<"huddles">; roomId?: string }) => void;
   onError?: (error: Error) => void;
   throwError?: boolean;
 }
@@ -27,8 +27,10 @@ export function useLeaveHuddle() {
         setError(null);
         setStatus("pending");
 
-        await mutation({ huddleId });
-        options?.onSuccess?.();
+        const response = await mutation({ huddleId });
+        if (response) {
+          options?.onSuccess?.(response);
+        }
         setStatus("success");
       } catch (error) {
         setError(error as Error);

@@ -2,17 +2,17 @@
 
 import * as React from "react";
 import {
-  Bell,
-  Check,
-  Globe,
-  Home,
-  Keyboard,
-  Link,
-  Lock,
-  Menu,
-  MessageCircle,
-  Paintbrush,
-  Settings,
+  // Bell,
+  // Check,
+  // Globe,
+  // Home,
+  // Keyboard,
+  // Link,
+  // Lock,
+  // Menu,
+  // MessageCircle,
+  // Paintbrush,
+  // Settings,
   Video,
 } from "lucide-react";
 import {
@@ -31,6 +31,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from "@/components/ui/sidebar";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSettingsModal } from "@/store/use-settings-modal";
 import { AudioVideoSettings } from "@/features/huddle/components/AudioVideoSettings";
 
@@ -43,18 +44,18 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { name: "Notifications", icon: Bell, section: null },
-  { name: "Navigation", icon: Menu, section: null },
-  { name: "Home", icon: Home, section: null },
-  { name: "Appearance", icon: Paintbrush, section: null },
-  { name: "Messages & media", icon: MessageCircle, section: null },
-  { name: "Language & region", icon: Globe, section: null },
-  { name: "Accessibility", icon: Keyboard, section: null },
-  { name: "Mark as read", icon: Check, section: null },
+  // { name: "Notifications", icon: Bell, section: null },
+  // { name: "Navigation", icon: Menu, section: null },
+  // { name: "Home", icon: Home, section: null },
+  // { name: "Appearance", icon: Paintbrush, section: null },
+  // { name: "Messages & media", icon: MessageCircle, section: null },
+  // { name: "Language & region", icon: Globe, section: null },
+  // { name: "Accessibility", icon: Keyboard, section: null },
+  // { name: "Mark as read", icon: Check, section: null },
   { name: "Audio & video", icon: Video, section: "audio-video" },
-  { name: "Connected accounts", icon: Link, section: null },
-  { name: "Privacy & visibility", icon: Lock, section: null },
-  { name: "Advanced", icon: Settings, section: null },
+  // { name: "Connected accounts", icon: Link, section: null },
+  // { name: "Privacy & visibility", icon: Lock, section: null },
+  // { name: "Advanced", icon: Settings, section: null },
 ];
 
 /**
@@ -101,44 +102,48 @@ export function UnifiedSettingsDialog() {
         <DialogDescription className="sr-only">
           Customize your settings here.
         </DialogDescription>
-        <SidebarProvider className="items-start">
-          <Sidebar collapsible="none" className="hidden md:flex">
-            <SidebarContent>
-              <SidebarGroup>
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    {navItems.map((item) => (
-                      <SidebarMenuItem key={item.name}>
-                        <SidebarMenuButton
-                          isActive={item.section === activeSection}
-                          onClick={() =>
-                            item.section && setActiveSection(item.section)
-                          }
-                        >
-                          <item.icon />
-                          <span>{item.name}</span>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    ))}
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </SidebarGroup>
-            </SidebarContent>
-          </Sidebar>
-          <main className="flex h-auto flex-1 flex-col overflow-hidden">
-            <header className="flex h-16 shrink-0 items-center gap-2 border-b border-border transition-[width,height] ease-linear">
-              <div className="flex items-center gap-2 px-4">
-                <h2 className="text-lg font-semibold">
-                  {navItems.find((item) => item.section === activeSection)
-                    ?.name || "Settings"}
-                </h2>
-              </div>
-            </header>
-            <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-4">
-              {renderContent()}
-            </div>
-          </main>
-        </SidebarProvider>
+        <div className="flex h-[600px]">
+          <SidebarProvider className="flex flex-1 items-start">
+            <Sidebar collapsible="none" className="hidden md:flex">
+              <SidebarContent>
+                <SidebarGroup>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      {navItems.map((item) => (
+                        <SidebarMenuItem key={item.name}>
+                          <SidebarMenuButton
+                            isActive={item.section === activeSection}
+                            onClick={() =>
+                              item.section && setActiveSection(item.section)
+                            }
+                          >
+                            <item.icon />
+                            <span>{item.name}</span>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      ))}
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </SidebarGroup>
+              </SidebarContent>
+            </Sidebar>
+            <main className="flex flex-1 flex-col h-full">
+              <header className="flex h-16 shrink-0 items-center gap-2 border-b border-border transition-[width,height] ease-linear">
+                <div className="flex items-center gap-2 px-4">
+                  <h2 className="text-lg font-semibold">
+                    {navItems.find((item) => item.section === activeSection)
+                      ?.name || "Settings"}
+                  </h2>
+                </div>
+              </header>
+              <ScrollArea className="h-[calc(600px-4rem)]">
+                <div className="flex flex-col gap-4 px-6 py-4">
+                  {renderContent()}
+                </div>
+              </ScrollArea>
+            </main>
+          </SidebarProvider>
+        </div>
       </DialogContent>
     </Dialog>
   );

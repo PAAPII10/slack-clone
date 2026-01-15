@@ -2,6 +2,7 @@
 
 import { atom, useAtom } from "jotai";
 import { useEffect, useCallback } from "react";
+import { logger } from "@/lib/logger";
 
 interface HuddleAudioSettings {
   selectedMicId: string | null;
@@ -18,12 +19,12 @@ const STORAGE_KEY = "huddle-audio-settings";
 const DEFAULT_SETTINGS: HuddleAudioSettings = {
   selectedMicId: null,
   selectedSpeakerId: null,
-  micGain: 0.6,
+  micGain: 0.8,
   outputVolume: 1.0,
   echoCancellation: true,
   noiseSuppression: true,
   autoGainControl: true, // Enable by default for better noise handling
-  startMuted: false,
+  startMuted: true, // Join huddles with microphone muted by default
 };
 
 // Load initial settings from localStorage
@@ -58,7 +59,7 @@ export function useHuddleAudioSettings() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
     } catch (error) {
-      console.error("Error saving audio settings:", error);
+      logger.error("Error saving audio settings", error as Error);
     }
   }, [settings]);
 

@@ -12,7 +12,7 @@ export function Modals() {
     <>
       <CreateChannelModal />
       <CreateWorkspaceModal />
-      <UnifiedSettingsDialog />
+      {/* UnifiedSettingsDialog is now rendered inside LiveKitRoomProvider in workspace layout */}
       <IncomingHuddleNotification />
     </>
   );

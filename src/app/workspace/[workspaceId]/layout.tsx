@@ -21,6 +21,8 @@ import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { useHuddleNotifications } from "@/features/huddle/hooks/use-huddle-notifications";
 import { useGetWorkspace } from "@/features/workspaces/api/use-get-workspace";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { LiveKitRoomProvider } from "@/features/live-kit/provider/LiveKitRoomProvider";
+import { UnifiedSettingsDialog } from "@/components/UnifiedSettingsDialog";
 
 export default function WorkspaceIdLayout({ children }: PropsWithChildren) {
   const workspaceId = useWorkspaceId();
@@ -53,49 +55,52 @@ export default function WorkspaceIdLayout({ children }: PropsWithChildren) {
   }
 
   return (
-    <div className="h-full">
-      <Toolbar />
-      <div className="flex h-[calc(100vh-40px)]">
-        <Sidebar />
-        <ResizablePanelGroup
-          direction="horizontal"
-          autoSaveId="ca-workspace-layout"
-        >
-          <ResizablePanel
-            defaultSize={20}
-            minSize={11}
-            className="bg-[#5E2C5F]"
+    <LiveKitRoomProvider>
+      <div className="h-full">
+        <Toolbar />
+        <div className="flex h-[calc(100vh-40px)]">
+          <Sidebar />
+          <ResizablePanelGroup
+            direction="horizontal"
+            autoSaveId="ca-workspace-layout"
           >
-            <WorkspaceSidebar />
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel minSize={20} defaultSize={80}>
-            {children}
-          </ResizablePanel>
-          {showPanel && (
-            <>
-              <ResizableHandle withHandle />
-              <ResizablePanel defaultSize={29} minSize={20}>
-                {parentMessageId ? (
-                  <Thread
-                    messageId={parentMessageId as Id<"messages">}
-                    onClose={onClose}
-                  />
-                ) : profileMemberId ? (
-                  <Profile
-                    memberId={profileMemberId as Id<"members">}
-                    onClose={onClose}
-                  />
-                ) : (
-                  <div className="flex items-center justify-center h-full">
-                    <Loader className="size-5 animate-spin text-muted-foreground" />
-                  </div>
-                )}
-              </ResizablePanel>
-            </>
-          )}
-        </ResizablePanelGroup>
+            <ResizablePanel
+              defaultSize={20}
+              minSize={11}
+              className="bg-[#5E2C5F]"
+            >
+              <WorkspaceSidebar />
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ResizablePanel minSize={20} defaultSize={80}>
+              {children}
+            </ResizablePanel>
+            {showPanel && (
+              <>
+                <ResizableHandle withHandle />
+                <ResizablePanel defaultSize={29} minSize={20}>
+                  {parentMessageId ? (
+                    <Thread
+                      messageId={parentMessageId as Id<"messages">}
+                      onClose={onClose}
+                    />
+                  ) : profileMemberId ? (
+                    <Profile
+                      memberId={profileMemberId as Id<"members">}
+                      onClose={onClose}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full">
+                      <Loader className="size-5 animate-spin text-muted-foreground" />
+                    </div>
+                  )}
+                </ResizablePanel>
+              </>
+            )}
+          </ResizablePanelGroup>
+        </div>
+        <UnifiedSettingsDialog />
       </div>
-    </div>
+    </LiveKitRoomProvider>
   );
 }

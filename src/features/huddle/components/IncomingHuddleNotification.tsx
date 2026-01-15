@@ -12,39 +12,31 @@ import { useEffect } from "react";
 import { useDeclineHuddle } from "../api/use-decline-huddle";
 import { useGetIncomingHuddle } from "../api/use-get-incoming-huddle";
 import { useCurrentMember } from "@/features/members/api/use-current-member";
-import { useJoinHuddle } from "../api/use-join-huddle";
-
-/**
- * IncomingHuddleNotification Component
- *
- * Shows notification when someone starts a huddle
- *
- * PHASE 1: UI-only implementation
- * - Mock incoming huddle notifications
- * - Shows caller information
- * - Provides Join/Decline options
- *
- * TODO (PHASE 2+):
- * - Connect to Convex for real-time huddle invitations
- * - Show actual caller information
- * - Handle multiple incoming huddles
- * - Add sound/vibration notifications
- */
+import { useJoinHuddle } from "../api/new/use-join-huddle";
+import { useLiveKitToken } from "@/features/live-kit/store/use-live-kit-token";
+import { useShowHuddleDialog } from "./new/store/use-show-huddle-dialog";
+import { logger } from "@/lib/logger";
 
 export function IncomingHuddleNotification() {
   const workspaceId = useWorkspaceId();
+  const [, setLiveKitToken] = useLiveKitToken();
+  const [, setShowHuddleDialog] = useShowHuddleDialog();
   const { data: incomingHuddle } = useGetIncomingHuddle({
     workspaceId,
   });
+
   const { data: currentMember } = useCurrentMember({
     workspaceId: workspaceId,
   });
+
   const { mutate: joinHuddle } = useJoinHuddle();
+
   const { mutate: declineHuddle } = useDeclineHuddle();
 
-  console.log("incomingHuddle", incomingHuddle);
-  // Show notification if we have incoming huddle data
-  // TODO (PHASE 2): Get this from Convex real-time updates
+  const { data: caller } = useGetMember({
+    id: incomingHuddle?.createdBy ?? undefined,
+  });
+
   const showNotification = Boolean(incomingHuddle);
 
   // Stop incoming call sound when notification is cleared
@@ -53,6 +45,8 @@ export function IncomingHuddleNotification() {
       stopHuddleSound("incoming_call");
     }
   }, [showNotification]);
+
+  if (!currentMember) return null;
 
   const handleJoin = () => {
     if (!incomingHuddle || !workspaceId) return;
@@ -63,17 +57,22 @@ export function IncomingHuddleNotification() {
     // Immediately join the huddle
     joinHuddle(
       {
-        workspaceId,
         huddleId: incomingHuddle._id,
+        workspaceId,
+        memberId: currentMember._id,
+        participantName: getUserDisplayName(caller?.user ?? {}),
+        roomId: incomingHuddle.roomId,
       },
       {
-        onSuccess: (huddleId) => {
-          console.log("Joined huddle from notification:", huddleId);
+        onSuccess: (data) => {
+          logger.debug("Joined huddle from notification", { huddleId: data.huddleId });
+          setShowHuddleDialog(true);
+          setLiveKitToken({ token: data.token, url: data.url });
           // Play join sound
           playHuddleSound("join");
         },
         onError: (error) => {
-          console.error("Failed to join huddle from notification:", error);
+          logger.error("Failed to join huddle from notification", error as Error);
         },
       }
     );
@@ -91,19 +90,15 @@ export function IncomingHuddleNotification() {
         { huddleId: incomingHuddle._id },
         {
           onSuccess: () => {
-            console.log("Huddle declined, will be deleted after 20 seconds");
+            logger.debug("Huddle declined, will be deleted after 20 seconds");
           },
           onError: (error) => {
-            console.error("Failed to decline huddle:", error);
+            logger.error("Failed to decline huddle", error as Error);
           },
         }
       );
     }
   };
-
-  const { data: caller } = useGetMember({
-    id: incomingHuddle?.createdBy ?? undefined,
-  });
 
   if (incomingHuddle?.createdBy === currentMember?._id) return null;
 

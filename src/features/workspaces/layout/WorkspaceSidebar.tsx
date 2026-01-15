@@ -24,8 +24,12 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { getUserDisplayName } from "@/lib/user-utils";
-import { HuddleCall } from "@/features/huddle/components/HuddleCall";
+import { HuddleCall } from "@/features/huddle/components/new/components/HuddleCall";
+import { ChannelHuddleCall } from "@/features/huddle/components/channel/ChannelHuddleCall";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useGetHuddleByCurrentUser } from "@/features/huddle/api/use-get-huddle-by-current-user";
+import { useGetChannelHuddleByCurrentUser } from "@/features/huddle/api/channel/use-get-channel-huddle-by-current-user";
+import { useGetChannelHuddle } from "@/features/huddle/api/channel/use-get-channel-huddle";
 
 function ChannelItem({
   channel,
@@ -49,6 +53,11 @@ function ChannelItem({
     }
   );
 
+  // Check if this channel has an active huddle
+  const { hasActiveHuddle } = useGetChannelHuddle({
+    channelId: channel._id,
+  });
+
   const showJoinButton =
     channel.channelType === "public" && !isMember && !isLoadingMembership;
 
@@ -62,6 +71,7 @@ function ChannelItem({
       onJoin={() => onJoin(channel._id)}
       isJoining={isJoining}
       unreadCount={channel.unreadCount ?? 0}
+      hasActiveHuddle={hasActiveHuddle}
     />
   );
 }
@@ -89,6 +99,15 @@ export function WorkspaceSidebar() {
   });
 
   const { mutate: joinChannel, isPending: isJoining } = useJoinChannel();
+
+  const { data: activeHuddle, isLoading: isHuddleLoading } =
+    useGetHuddleByCurrentUser({ workspaceId });
+
+  const { data: activeChannelHuddle, isLoading: isChannelHuddleLoading } =
+    useGetChannelHuddleByCurrentUser({
+      workspaceId,
+      channelId: channelId || ("" as Id<"channels">),
+    });
 
   const handleJoinChannel = (channelId: Id<"channels">) => {
     joinChannel(
@@ -128,87 +147,100 @@ export function WorkspaceSidebar() {
   }
 
   return (
-    <div className="flex flex-col bg-[#5E2C5F] h-full">
-      <ScrollArea className="flex-1">
-        <WorkspaceHeader
-          workspace={workspace}
-          isAdmin={member.role === "admin"}
-        />
-        <div className="flex flex-col px-2 mt-3">
-          <SidebarItem
-            label="Threads"
-            icon={MessageSquareText}
-            id="threads"
-            href={`/workspace/${workspaceId}/threads`}
+    <div className="flex flex-col bg-[#5E2C5F] h-full overflow-hidden">
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="flex flex-col">
+          <WorkspaceHeader
+            workspace={workspace}
+            isAdmin={member.role === "admin"}
           />
+          <div className="flex flex-col px-2 mt-3">
+            <SidebarItem
+              label="Threads"
+              icon={MessageSquareText}
+              id="threads"
+              href={`/workspace/${workspaceId}/threads`}
+            />
 
-          <SidebarItem
-            label="Drafts & Sent"
-            icon={SendHorizontal}
-            id="drafts"
-            href={`/workspace/${workspaceId}/drafts`}
-          />
+            <SidebarItem
+              label="Drafts & Sent"
+              icon={SendHorizontal}
+              id="drafts"
+              href={`/workspace/${workspaceId}/drafts`}
+            />
+          </div>
+          <WorkspaceSection
+            label="Channels"
+            hint="New channel"
+            onNew={() => setOpen(true)}
+            defaultOpen
+          >
+            {[...channels]
+              .sort((a, b) => {
+                // Sort by unread count (unread channels first)
+                const aUnread = a.unreadCount ?? 0;
+                const bUnread = b.unreadCount ?? 0;
+                if (aUnread !== bUnread) {
+                  return bUnread - aUnread; // Higher unread count first
+                }
+                // If unread counts are equal, maintain original order (by name)
+                return a.name.localeCompare(b.name);
+              })
+              .map((item) => (
+                <ChannelItem
+                  key={`${item._id}-${item.channelType}`}
+                  channel={item}
+                  currentChannelId={channelId}
+                  onJoin={handleJoinChannel}
+                  isJoining={isJoining}
+                />
+              ))}
+          </WorkspaceSection>
+          <WorkspaceSection
+            label="Direct Messages"
+            hint="New direct message"
+            defaultOpen
+          >
+            {[...(members || [])]
+              .sort((a, b) => {
+                // Sort by unread count (unread conversations first)
+                const aUnread = a.unreadCount ?? 0;
+                const bUnread = b.unreadCount ?? 0;
+                if (aUnread !== bUnread) {
+                  return bUnread - aUnread; // Higher unread count first
+                }
+                // If unread counts are equal, maintain original order (by name)
+                const aName = getUserDisplayName(a.user);
+                const bName = getUserDisplayName(b.user);
+                return aName.localeCompare(bName);
+              })
+              .map((item) => (
+                <UserItem
+                  key={item._id}
+                  id={item._id}
+                  label={getUserDisplayName(item.user)}
+                  image={item.user.image}
+                  variant={memberId === item._id ? "active" : "default"}
+                  unreadCount={item.unreadCount ?? 0}
+                  isActive={memberId === item._id}
+                />
+              ))}
+          </WorkspaceSection>
         </div>
-        <WorkspaceSection
-          label="Channels"
-          hint="New channel"
-          onNew={() => setOpen(true)}
-          defaultOpen
-        >
-          {[...channels]
-            .sort((a, b) => {
-              // Sort by unread count (unread channels first)
-              const aUnread = a.unreadCount ?? 0;
-              const bUnread = b.unreadCount ?? 0;
-              if (aUnread !== bUnread) {
-                return bUnread - aUnread; // Higher unread count first
-              }
-              // If unread counts are equal, maintain original order (by name)
-              return a.name.localeCompare(b.name);
-            })
-            .map((item) => (
-              <ChannelItem
-                key={`${item._id}-${item.channelType}`}
-                channel={item}
-                currentChannelId={channelId}
-                onJoin={handleJoinChannel}
-                isJoining={isJoining}
-              />
-            ))}
-        </WorkspaceSection>
-        <WorkspaceSection
-          label="Direct Messages"
-          hint="New direct message"
-          defaultOpen
-        >
-          {[...(members || [])]
-            .sort((a, b) => {
-              // Sort by unread count (unread conversations first)
-              const aUnread = a.unreadCount ?? 0;
-              const bUnread = b.unreadCount ?? 0;
-              if (aUnread !== bUnread) {
-                return bUnread - aUnread; // Higher unread count first
-              }
-              // If unread counts are equal, maintain original order (by name)
-              const aName = getUserDisplayName(a.user);
-              const bName = getUserDisplayName(b.user);
-              return aName.localeCompare(bName);
-            })
-            .map((item) => (
-              <UserItem
-                key={item._id}
-                id={item._id}
-                label={getUserDisplayName(item.user)}
-                image={item.user.image}
-                variant={memberId === item._id ? "active" : "default"}
-                unreadCount={item.unreadCount ?? 0}
-                isActive={memberId === item._id}
-              />
-            ))}
-        </WorkspaceSection>
       </ScrollArea>
       <div className="shrink-0">
-        <HuddleCall />
+        {/* Show channel huddle if in a channel, otherwise show regular huddle */}
+        {channelId ? (
+          <ChannelHuddleCall
+            activeHuddle={activeChannelHuddle}
+            isHuddleLoading={isChannelHuddleLoading}
+          />
+        ) : (
+          <HuddleCall
+            activeHuddle={activeHuddle}
+            isHuddleLoading={isHuddleLoading}
+          />
+        )}
       </div>
     </div>
   );

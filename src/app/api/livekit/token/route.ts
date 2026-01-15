@@ -1,87 +1,101 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AccessToken } from "livekit-server-sdk";
+import { AccessToken, TrackSource } from "livekit-server-sdk";
+import { logger } from "@/lib/logger";
 import { isAuthenticatedNextjs } from "@convex-dev/auth/nextjs/server";
 
 /**
- * Phase 4: LiveKit Token API Route
- *
  * Generates LiveKit access tokens for authenticated users
  * Token includes participant identity (memberId) and room permissions
  */
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
     // Check authentication
     const isAuthenticated = await isAuthenticatedNextjs();
     if (!isAuthenticated) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-
-    // Get query parameters
-    const searchParams = request.nextUrl.searchParams;
-    const roomName = searchParams.get("room");
-    const participantIdentity = searchParams.get("identity"); // memberId
-
-    // Validate required parameters
-    if (!roomName) {
-      return NextResponse.json(
-        { error: "Missing room parameter" },
-        { status: 400 }
-      );
-    }
-
-    if (!participantIdentity) {
-      return NextResponse.json(
-        { error: "Missing identity parameter" },
-        { status: 400 }
-      );
-    }
-
-    // Get LiveKit credentials from environment variables
     const apiKey = process.env.LIVEKIT_API_KEY;
     const apiSecret = process.env.LIVEKIT_API_SECRET;
-    const serverUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
+    const livekitUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
 
-    if (!apiKey || !apiSecret) {
-      console.error("LiveKit API credentials not configured");
+    // Validate environment variables
+    if (!apiKey || !apiSecret || !livekitUrl) {
+      logger.error("Missing LiveKit environment variables");
       return NextResponse.json(
         { error: "Server configuration error" },
         { status: 500 }
       );
     }
 
-    if (!serverUrl) {
-      console.error("LiveKit server URL not configured");
+    // Parse request body
+    const body = await request.json();
+    const { identity, roomName, participantName } = body;
+
+    // Validate required fields
+    if (!identity || !roomName) {
       return NextResponse.json(
-        { error: "Server configuration error" },
-        { status: 500 }
+        { error: "Missing required fields: identity and roomName" },
+        { status: 400 }
+      );
+    }
+
+    // Validate room name (prevent injection attacks)
+    if (!/^[a-zA-Z0-9_-]+$/.test(roomName)) {
+      return NextResponse.json(
+        {
+          error:
+            "Invalid room name. Only alphanumeric, underscore, and hyphen allowed",
+        },
+        { status: 400 }
       );
     }
 
     // Create access token
-    const accessToken = new AccessToken(apiKey, apiSecret, {
-      identity: participantIdentity,
-      ttl: "1h", // Token valid for 1 hour
+    const at = new AccessToken(apiKey, apiSecret, {
+      identity: identity,
+      name: participantName || identity,
     });
 
-    // Add grant for room permissions
-    accessToken.addGrant({
-      roomJoin: true,
+    // Grant permissions
+    // CanPublish: Can publish audio/video tracks
+    // CanSubscribe: Can receive tracks from others
+    // CanPublishData: Can send data messages
+    // CanPublishSources: Can publish camera, microphone, and screen share
+    at.addGrant({
       room: roomName,
+      roomJoin: true,
       canPublish: true,
       canSubscribe: true,
       canPublishData: true,
+      canPublishSources: [
+        TrackSource.CAMERA,
+        TrackSource.MICROPHONE,
+        TrackSource.SCREEN_SHARE,
+      ],
       canUpdateOwnMetadata: true,
     });
 
-    // Generate JWT token
-    const jwt = await accessToken.toJwt();
+    // Set token expiration (6 hours) using ttl
+    at.ttl = "6h";
 
+    // Generate JWT token
+    const token = await at.toJwt();
+
+    logger.info("Generated LiveKit token", {
+      roomName,
+      identity,
+      hasParticipantName: !!participantName,
+    });
+
+    // Return token and URL to client
     return NextResponse.json({
-      token: jwt,
-      serverUrl,
+      token,
+      url: livekitUrl,
     });
   } catch (error) {
-    console.error("Error generating LiveKit token:", error);
+    logger.error("Error generating LiveKit token", error as Error, {
+      errorType: error instanceof Error ? error.constructor.name : "Unknown",
+    });
     return NextResponse.json(
       { error: "Failed to generate token" },
       { status: 500 }

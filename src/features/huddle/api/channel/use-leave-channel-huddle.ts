@@ -1,23 +1,27 @@
 import { useMutation } from "convex/react";
-import { api } from "../../../../convex/_generated/api";
-import { Id } from "../../../../convex/_generated/dataModel";
+import { api } from "../../../../../convex/_generated/api";
+import { Id } from "../../../../../convex/_generated/dataModel";
 import { useState, useCallback, useMemo } from "react";
 
-interface UseCloseChannelHuddleWhenNoParticipantsOptions {
-  onSuccess?: () => void;
+type UseLeaveChannelHuddleSuccess = {
+  channelHuddleId: Id<"channelHuddles">;
+  participantCount: number;
+  roomId?: string;
+};
+
+interface UseLeaveChannelHuddleOptions {
+  onSuccess?: (response: UseLeaveChannelHuddleSuccess) => void;
   onError?: (error: Error) => void;
   throwError?: boolean;
 }
 
-export function useCloseChannelHuddleWhenNoParticipants() {
+export function useLeaveChannelHuddle() {
   const [error, setError] = useState<Error | null>(null);
   const [status, setStatus] = useState<
     "success" | "error" | "pending" | "settled" | null
   >(null);
 
-  const mutation = useMutation(
-    api.channelHuddles.closeChannelHuddleWhenNoParticipants
-  );
+  const mutation = useMutation(api.channelHuddles.leaveChannelHuddle);
   const isPending = useMemo(() => status === "pending", [status]);
   const isSuccess = useMemo(() => status === "success", [status]);
   const isError = useMemo(() => status === "error", [status]);
@@ -25,15 +29,17 @@ export function useCloseChannelHuddleWhenNoParticipants() {
 
   const mutate = useCallback(
     async (
-      values: { channelId: Id<"channels"> },
-      options?: UseCloseChannelHuddleWhenNoParticipantsOptions
+      channelHuddleId: Id<"channelHuddles">,
+      options?: UseLeaveChannelHuddleOptions
     ) => {
       try {
         setError(null);
         setStatus("pending");
 
-        await mutation(values);
-        options?.onSuccess?.();
+        const response = await mutation({ channelHuddleId });
+        if (response) {
+          options?.onSuccess?.(response);
+        }
         setStatus("success");
       } catch (error) {
         setError(error as Error);

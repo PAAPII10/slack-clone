@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Id } from "../../../../convex/_generated/dataModel";
+import { logger } from "@/lib/logger";
 
 interface UseActiveSpeakerOptions {
   isHuddleActive: boolean;
@@ -51,7 +52,7 @@ export function useActiveSpeaker({
       (window as typeof window & { webkitAudioContext?: typeof AudioContext })
         .webkitAudioContext;
     if (!AudioContextClass) {
-      console.warn("AudioContext not available for active speaker detection");
+      logger.warn("AudioContext not available for active speaker detection");
       return;
     }
 
@@ -92,7 +93,7 @@ export function useActiveSpeaker({
             contexts.set(memberId, { context, analyser, source });
           }
         } catch (error) {
-          console.warn(`Failed to setup audio analysis for ${memberId}:`, error);
+          logger.warn("Failed to setup audio analysis for member", { memberId, error });
         }
       }
     });

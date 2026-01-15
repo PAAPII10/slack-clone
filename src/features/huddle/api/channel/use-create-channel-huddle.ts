@@ -1,23 +1,28 @@
 import { useMutation } from "convex/react";
-import { api } from "../../../../convex/_generated/api";
-import { Id } from "../../../../convex/_generated/dataModel";
+import { api } from "../../../../../convex/_generated/api";
+import { Id } from "../../../../../convex/_generated/dataModel";
 import { useState, useCallback, useMemo } from "react";
 
-interface UseCloseChannelHuddleWhenNoParticipantsOptions {
-  onSuccess?: () => void;
+interface UseCreateChannelHuddleOptions {
+  onSuccess?: (channelHuddleId: Id<"channelHuddles">) => void;
   onError?: (error: Error) => void;
   throwError?: boolean;
 }
 
-export function useCloseChannelHuddleWhenNoParticipants() {
+interface UseCreateChannelHuddleProps {
+  workspaceId: Id<"workspaces">;
+  channelId: Id<"channels">;
+  startMuted?: boolean;
+}
+
+export function useCreateChannelHuddle() {
+  const [data, setData] = useState<Id<"channelHuddles"> | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [status, setStatus] = useState<
     "success" | "error" | "pending" | "settled" | null
   >(null);
 
-  const mutation = useMutation(
-    api.channelHuddles.closeChannelHuddleWhenNoParticipants
-  );
+  const mutation = useMutation(api.channelHuddles.createChannelHuddle);
   const isPending = useMemo(() => status === "pending", [status]);
   const isSuccess = useMemo(() => status === "success", [status]);
   const isError = useMemo(() => status === "error", [status]);
@@ -25,16 +30,19 @@ export function useCloseChannelHuddleWhenNoParticipants() {
 
   const mutate = useCallback(
     async (
-      values: { channelId: Id<"channels"> },
-      options?: UseCloseChannelHuddleWhenNoParticipantsOptions
+      values: UseCreateChannelHuddleProps,
+      options?: UseCreateChannelHuddleOptions
     ) => {
       try {
+        setData(null);
         setError(null);
         setStatus("pending");
 
-        await mutation(values);
-        options?.onSuccess?.();
+        const response = await mutation(values);
+        options?.onSuccess?.(response);
+        setData(response);
         setStatus("success");
+        return response;
       } catch (error) {
         setError(error as Error);
         setStatus("error");
@@ -49,5 +57,5 @@ export function useCloseChannelHuddleWhenNoParticipants() {
     [mutation]
   );
 
-  return { mutate, error, isPending, isSuccess, isError, isSettled };
+  return { mutate, data, error, isPending, isSuccess, isError, isSettled };
 }

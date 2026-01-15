@@ -12,94 +12,581 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { useHuddleAudioSettings } from "../hooks/use-huddle-audio-settings";
-import { useAudioDevices } from "../hooks/use-audio-devices";
-import { useMicLevel } from "../hooks/use-mic-level";
-import { useHuddleMedia } from "./HuddleMediaProvider";
-import { Volume2, Mic, RefreshCw } from "lucide-react";
-import { useMemo, useState, useCallback } from "react";
-import { getAudioContextConstructor } from "@/lib/audio-context-types";
-import { useRoomContext } from "@livekit/components-react";
-import { Track, LocalAudioTrack } from "livekit-client";
+import { useLiveKitToken } from "@/features/live-kit/store/use-live-kit-token";
+import { Volume2, Mic, Video, RefreshCw } from "lucide-react";
+import { logger } from "@/lib/logger";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  Component,
+  ReactNode,
+} from "react";
+import {
+  useLocalParticipant,
+  useMediaDevices,
+} from "@livekit/components-react";
+import {
+  LocalAudioTrack,
+  LocalVideoTrack,
+  createLocalAudioTrack,
+  TrackProcessor,
+  Track,
+} from "livekit-client";
 
 /**
  * Audio & Video Settings Content Component
  *
- * Uses LiveKit's device and audio processing APIs when connected,
- * falls back to settings storage when not connected.
+ * Full implementation with all features from communication-channel:
+ * - Microphone: Device selection, volume control, noise suppression, echo cancellation, auto gain
+ * - Speaker: Device selection, volume control
+ * - Camera: Device selection
  */
-export function AudioVideoSettings() {
+/**
+ * Wrapper component that only uses LiveKit hooks when in room context
+ * This component MUST be rendered inside LiveKitRoom context
+ * The error boundary will catch errors if not in context
+ */
+function AudioVideoSettingsContent() {
   const { settings, updateSettings } = useHuddleAudioSettings();
-  const {
-    inputDevices,
-    outputDevices,
-    isLoading: devicesLoading,
-    refresh: refreshDevices,
-  } = useAudioDevices();
-  const { localStream } = useHuddleMedia();
-  const { level: micLevel, isClipping } = useMicLevel(localStream, true);
+
+  // Always call hooks unconditionally (React rules)
+  // These will throw if not in room context - error boundary will catch it
+  const { localParticipant, isMicrophoneEnabled, isCameraEnabled } =
+    useLocalParticipant();
+
+  // Get available devices using LiveKit hook
+  const audioInputDevices = useMediaDevices({ kind: "audioinput" });
+  const audioOutputDevices = useMediaDevices({ kind: "audiooutput" });
+  const videoInputDevices = useMediaDevices({ kind: "videoinput" });
+
+  // State for device selection
+  const [selectedAudioInput, setSelectedAudioInput] = useState<string>("");
+  const [selectedAudioOutput, setSelectedAudioOutput] = useState<string>("");
+  const [selectedVideoInput, setSelectedVideoInput] = useState<string>("");
   const [isApplying, setIsApplying] = useState(false);
 
-  // Try to get room context (may not be available if not in LiveKitRoom)
-  let room: ReturnType<typeof useRoomContext> | null = null;
-  try {
-    room = useRoomContext();
-  } catch {
-    // Not inside LiveKitRoom context
-  }
+  // Helper to get audio track
+  const getAudioTrack = useCallback((): LocalAudioTrack | null => {
+    if (!localParticipant) return null;
+    for (const publication of localParticipant.audioTrackPublications.values()) {
+      if (publication.track instanceof LocalAudioTrack) {
+        return publication.track;
+      }
+    }
+    return null;
+  }, [localParticipant]);
 
-  const isConnected = room?.state === "connected";
+  // Helper to get video track
+  const getVideoTrack = useCallback((): LocalVideoTrack | null => {
+    if (!localParticipant) return null;
+    for (const publication of localParticipant.videoTrackPublications.values()) {
+      if (publication.track instanceof LocalVideoTrack) {
+        return publication.track;
+      }
+    }
+    return null;
+  }, [localParticipant]);
 
-  // Switch microphone using LiveKit or just save setting
+  // Track if we're recreating to avoid loops
+  const isRecreatingRef = useRef(false);
+  // Track previous constraint values to only recreate when they actually change
+  const prevConstraintsRef = useRef<{
+    echoCancellation: boolean;
+    noiseSuppression: boolean;
+    autoGainControl: boolean;
+  } | null>(null);
+  // Track previous volume to only recreate when it changes significantly
+  const prevVolumeRef = useRef<number | null>(null);
+  // Store gain node reference for volume control
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  // Get current device IDs
+  useEffect(() => {
+    const updateCurrentDevices = async () => {
+      const audioTrack = getAudioTrack();
+      if (audioTrack) {
+        try {
+          const deviceId = await audioTrack.getDeviceId();
+          if (deviceId) setSelectedAudioInput(deviceId);
+        } catch (e) {
+          logger.error("Failed to get audio input device", e as Error);
+        }
+      }
+
+      const videoTrack = getVideoTrack();
+      if (videoTrack) {
+        try {
+          const deviceId = await videoTrack.getDeviceId();
+          if (deviceId) setSelectedVideoInput(deviceId);
+        } catch (e) {
+          logger.error("Failed to get video input device", e as Error);
+        }
+      }
+    };
+
+    if (localParticipant) {
+      updateCurrentDevices();
+    }
+  }, [localParticipant, getAudioTrack, getVideoTrack]);
+
+  // Create a gain processor for volume control
+  const createGainProcessor = useCallback(
+    (volume: number): TrackProcessor<Track.Kind.Audio> => {
+      let sourceNode: MediaStreamAudioSourceNode | null = null;
+      let gainNode: GainNode | null = null;
+      let destination: MediaStreamAudioDestinationNode | null = null;
+      let processorAudioContext: AudioContext | null = null;
+
+      const processor: TrackProcessor<Track.Kind.Audio> = {
+        name: "volume-gain-processor",
+        async init(opts) {
+          if (!opts.audioContext) {
+            throw new Error("AudioContext is required");
+          }
+          processorAudioContext = opts.audioContext;
+          const stream = new MediaStream([opts.track]);
+          sourceNode = processorAudioContext.createMediaStreamSource(stream);
+          gainNode = processorAudioContext.createGain();
+          destination = processorAudioContext.createMediaStreamDestination();
+
+          // Apply volume directly - allow 0 when input is 0%
+          const maxGain = 1.0; // 100% maximum
+          const normalizedVolume = volume; // Already 0-1
+          const adjustedGain = normalizedVolume * maxGain; // Can be 0 when input is 0%
+
+          gainNode.gain.value = adjustedGain;
+          sourceNode.connect(gainNode);
+          gainNode.connect(destination);
+
+          // Store reference for dynamic updates
+          gainNodeRef.current = gainNode;
+          audioContextRef.current = processorAudioContext;
+
+          // Set processed track
+          processor.processedTrack = destination.stream.getAudioTracks()[0];
+        },
+        async restart(opts) {
+          await processor.destroy();
+          await processor.init(opts);
+        },
+        async destroy() {
+          if (sourceNode) {
+            try {
+              sourceNode.disconnect();
+            } catch {
+              // Ignore disconnect errors
+            }
+            sourceNode = null;
+          }
+          if (gainNode) {
+            try {
+              gainNode.disconnect();
+            } catch {
+              // Ignore disconnect errors
+            }
+            gainNode = null;
+          }
+          if (destination) {
+            try {
+              destination.stream.getTracks().forEach((track) => track.stop());
+            } catch {
+              // Ignore stop errors
+            }
+            destination = null;
+          }
+          gainNodeRef.current = null;
+          audioContextRef.current = null;
+        },
+      };
+      return processor;
+    },
+    []
+  );
+
+  // Initialize processor on existing track immediately when available
+  useEffect(() => {
+    const initializeProcessor = async () => {
+      const audioTrack = getAudioTrack();
+      if (!audioTrack || !isMicrophoneEnabled || !localParticipant) {
+        return;
+      }
+
+      // Check if track already has a processor
+      if (audioTrack.getProcessor() || gainNodeRef.current) {
+        return;
+      }
+
+      try {
+        // Create AudioContext for processor
+        const AudioContextClass =
+          window.AudioContext ||
+          (window as { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext;
+        if (!AudioContextClass) {
+          return;
+        }
+
+        const audioContext = new AudioContextClass({
+          latencyHint: "interactive",
+        });
+
+        // Ensure AudioContext is running
+        if (audioContext.state === "suspended") {
+          await audioContext.resume();
+        }
+
+        // Set AudioContext on the track
+        audioTrack.setAudioContext(audioContext);
+
+        // Create gain processor for volume control
+        const processor = createGainProcessor(settings.micGain);
+
+        // Set the processor (this will initialize it)
+        await audioTrack.setProcessor(processor);
+
+        logger.debug("Initialized volume processor on existing track");
+      } catch (error) {
+        logger.error("Failed to initialize volume processor", error as Error);
+      }
+    };
+
+    // Run immediately when track becomes available
+    if (localParticipant) {
+      initializeProcessor();
+    }
+  }, [
+    localParticipant,
+    isMicrophoneEnabled,
+    settings.micGain,
+    getAudioTrack,
+    createGainProcessor,
+  ]);
+
+  // Recreate audio track with new constraints and volume
+  const recreateAudioTrack = useCallback(async () => {
+    const currentTrack = getAudioTrack();
+    if (!currentTrack || !isMicrophoneEnabled || !localParticipant) return;
+
+    try {
+      setIsApplying(true);
+      // Get current device ID
+      const currentDeviceId =
+        selectedAudioInput || (await currentTrack.getDeviceId());
+
+      // Unpublish old track
+      const publication = Array.from(
+        localParticipant.audioTrackPublications.values()
+      ).find((pub) => pub.track === currentTrack);
+      if (publication) {
+        await localParticipant.unpublishTrack(currentTrack, true);
+      }
+
+      // Create AudioContext for processor
+      const AudioContextClass =
+        window.AudioContext ||
+        (window as { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+      if (!AudioContextClass) {
+        throw new Error("AudioContext is not supported in this browser");
+      }
+      const audioContext = new AudioContextClass({
+        latencyHint: "interactive",
+      });
+
+      // Ensure AudioContext is running
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
+
+      // Create new track WITHOUT processor first
+      const newTrack = await createLocalAudioTrack({
+        deviceId: currentDeviceId || undefined,
+        echoCancellation: settings.echoCancellation,
+        noiseSuppression: settings.noiseSuppression,
+        autoGainControl: settings.autoGainControl,
+      });
+
+      // Set AudioContext on the track (required before setting processor)
+      newTrack.setAudioContext(audioContext);
+
+      // Create gain processor for volume control
+      const processor = createGainProcessor(settings.micGain);
+
+      // Now set the processor (this will initialize it with the AudioContext)
+      await newTrack.setProcessor(processor);
+
+      // Publish new track
+      await localParticipant.publishTrack(newTrack);
+
+      // Update selected device
+      const newDeviceId = await newTrack.getDeviceId();
+      if (newDeviceId) setSelectedAudioInput(newDeviceId);
+
+      logger.debug("Recreated audio track with constraints and volume", {
+        echoCancellation: settings.echoCancellation,
+        noiseSuppression: settings.noiseSuppression,
+        autoGainControl: settings.autoGainControl,
+        micGain: settings.micGain,
+      });
+    } catch (error) {
+      logger.error("Failed to recreate audio track", error as Error);
+      alert("Failed to apply audio settings. Please try again.");
+    } finally {
+      setIsApplying(false);
+    }
+  }, [
+    localParticipant,
+    isMicrophoneEnabled,
+    selectedAudioInput,
+    settings.echoCancellation,
+    settings.noiseSuppression,
+    settings.autoGainControl,
+    settings.micGain,
+    getAudioTrack,
+    createGainProcessor,
+  ]);
+
+  // Recreate track when constraints change (but not on initial panel open)
+  useEffect(() => {
+    // Skip if we're already recreating
+    if (isRecreatingRef.current) {
+      isRecreatingRef.current = false;
+      return;
+    }
+
+    // Skip if panel just opened (initial state)
+    if (!prevConstraintsRef.current) {
+      prevConstraintsRef.current = {
+        echoCancellation: settings.echoCancellation,
+        noiseSuppression: settings.noiseSuppression,
+        autoGainControl: settings.autoGainControl,
+      };
+      return;
+    }
+
+    // Only recreate if constraints actually changed
+    const constraintsChanged =
+      prevConstraintsRef.current.echoCancellation !==
+        settings.echoCancellation ||
+      prevConstraintsRef.current.noiseSuppression !==
+        settings.noiseSuppression ||
+      prevConstraintsRef.current.autoGainControl !== settings.autoGainControl;
+
+    if (!constraintsChanged) {
+      return;
+    }
+
+    // Update previous constraints
+    prevConstraintsRef.current = {
+      echoCancellation: settings.echoCancellation,
+      noiseSuppression: settings.noiseSuppression,
+      autoGainControl: settings.autoGainControl,
+    };
+
+    const audioTrack = getAudioTrack();
+    if (audioTrack && isMicrophoneEnabled && localParticipant) {
+      // Debounce to avoid recreating on every change
+      const timeoutId = setTimeout(() => {
+        recreateAudioTrack();
+      }, 500);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [
+    settings.noiseSuppression,
+    settings.echoCancellation,
+    settings.autoGainControl,
+    isMicrophoneEnabled,
+    localParticipant,
+    recreateAudioTrack,
+    getAudioTrack,
+  ]);
+
+  // Apply input volume - Update gain node if it exists, otherwise recreate track
+  useEffect(() => {
+    const audioTrack = getAudioTrack();
+    if (!audioTrack || !isMicrophoneEnabled || !localParticipant) {
+      return;
+    }
+
+    // If gain node exists (from processor), update it directly
+    if (gainNodeRef.current) {
+      try {
+        // Apply volume directly - allow 0 when input is 0%
+        const maxGain = 1.0; // 100% maximum
+        const normalizedVolume = settings.micGain;
+        const adjustedGain = normalizedVolume * maxGain; // Can be 0 when input is 0%
+
+        gainNodeRef.current.gain.value = adjustedGain;
+        logger.debug("Updated input volume", {
+          inputVolume: `${Math.round(settings.micGain * 100)}%`,
+          adjustedGain,
+        });
+        return;
+      } catch (error) {
+        logger.error("Failed to update gain node", error as Error);
+      }
+    }
+
+    // If no gain node exists and volume changed significantly, recreate track
+    const volumeChanged =
+      prevVolumeRef.current === null ||
+      Math.abs((prevVolumeRef.current || 0) - settings.micGain) > 0.05; // Only recreate if change > 5%
+
+    if (volumeChanged && localParticipant) {
+      prevVolumeRef.current = settings.micGain;
+      // Debounce to avoid recreating on every slider movement
+      const timeoutId = setTimeout(() => {
+        isRecreatingRef.current = true;
+        recreateAudioTrack();
+      }, 300);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [
+    settings.micGain,
+    isMicrophoneEnabled,
+    localParticipant,
+    getAudioTrack,
+    recreateAudioTrack,
+  ]);
+
+  // Switch microphone - save setting and switch device
   const handleMicChange = useCallback(
     async (deviceId: string) => {
       const actualDeviceId = deviceId === "default" ? null : deviceId;
-      
-      if (isConnected && room) {
-        try {
-          setIsApplying(true);
-          if (actualDeviceId) {
-            await room.switchActiveDevice("audioinput", actualDeviceId);
+      updateSettings({ selectedMicId: actualDeviceId });
+      setSelectedAudioInput(deviceId);
+
+      try {
+        const audioTrack = getAudioTrack();
+        if (audioTrack && localParticipant) {
+          // Unpublish old track
+          const publication = Array.from(
+            localParticipant.audioTrackPublications.values()
+          ).find((pub) => pub.track === audioTrack);
+          if (publication) {
+            await localParticipant.unpublishTrack(audioTrack, true);
           }
-          updateSettings({ selectedMicId: actualDeviceId });
-          console.log("Switched microphone to:", actualDeviceId);
-        } catch (err) {
-          console.error("Error switching microphone:", err);
-        } finally {
-          setIsApplying(false);
+
+          // Create new track with new device and current constraints
+          isRecreatingRef.current = true;
+          const newTrack = await createLocalAudioTrack({
+            deviceId: actualDeviceId || undefined,
+            echoCancellation: settings.echoCancellation,
+            noiseSuppression: settings.noiseSuppression,
+            autoGainControl: settings.autoGainControl,
+          });
+
+          // Set AudioContext and processor if needed
+          const AudioContextClass =
+            window.AudioContext ||
+            (window as { webkitAudioContext?: typeof AudioContext })
+              .webkitAudioContext;
+          if (AudioContextClass) {
+            const audioContext = new AudioContextClass({
+              latencyHint: "interactive",
+            });
+            if (audioContext.state === "suspended") {
+              await audioContext.resume();
+            }
+            newTrack.setAudioContext(audioContext);
+            const processor = createGainProcessor(settings.micGain);
+            await newTrack.setProcessor(processor);
+          }
+
+          // Publish new track
+          await localParticipant.publishTrack(newTrack);
+          setSelectedAudioInput(deviceId);
+        } else {
+          alert("No audio track found. Please enable your microphone first.");
         }
-      } else {
-        updateSettings({ selectedMicId: actualDeviceId });
+      } catch (error) {
+        logger.error("Failed to switch audio input device", error as Error);
+        alert("Failed to switch microphone. Please try again.");
       }
     },
-    [isConnected, room, updateSettings]
+    [
+      updateSettings,
+      getAudioTrack,
+      localParticipant,
+      settings,
+      createGainProcessor,
+    ]
   );
 
-  // Switch speaker using LiveKit or just save setting
+  // Switch speaker - save setting and switch device
   const handleSpeakerChange = useCallback(
     async (deviceId: string) => {
       const actualDeviceId = deviceId === "default" ? null : deviceId;
-      
-      if (isConnected && room) {
-        try {
-          setIsApplying(true);
-          if (actualDeviceId) {
-            await room.switchActiveDevice("audiooutput", actualDeviceId);
-          }
-          updateSettings({ selectedSpeakerId: actualDeviceId });
-          console.log("Switched speaker to:", actualDeviceId);
-        } catch (err) {
-          console.error("Error switching speaker:", err);
-        } finally {
-          setIsApplying(false);
+      updateSettings({ selectedSpeakerId: actualDeviceId });
+      setSelectedAudioOutput(deviceId);
+
+      try {
+        // Use setSinkId on all audio elements (used by RoomAudioRenderer)
+        const audioElements = document.querySelectorAll("audio");
+        if (audioElements.length === 0) {
+          alert("No audio elements found. Audio may not be playing yet.");
+          return;
         }
-      } else {
-        updateSettings({ selectedSpeakerId: actualDeviceId });
+
+        const promises = Array.from(audioElements).map(async (audio) => {
+          if (
+            "setSinkId" in audio &&
+            typeof (
+              audio as HTMLAudioElement & {
+                setSinkId?: (id: string) => Promise<void>;
+              }
+            ).setSinkId === "function"
+          ) {
+            try {
+              await (
+                audio as HTMLAudioElement & {
+                  setSinkId: (id: string) => Promise<void>;
+                }
+              ).setSinkId(deviceId);
+              logger.debug("Set audio output device", { deviceId });
+            } catch (e) {
+              logger.error("Failed to set sink ID", e as Error);
+              throw e;
+            }
+          } else {
+            logger.warn("setSinkId not supported on this browser");
+          }
+        });
+
+        await Promise.all(promises);
+      } catch (error) {
+        logger.error("Failed to switch audio output device", error as Error);
+        alert(
+          "Failed to switch speaker. Browser may not support this feature or audio is not playing."
+        );
       }
     },
-    [isConnected, room, updateSettings]
+    [updateSettings]
   );
 
-  // Apply audio processing settings to LiveKit track
+  // Switch video device
+  const handleVideoChange = useCallback(
+    async (deviceId: string) => {
+      try {
+        const videoTrack = getVideoTrack();
+        if (videoTrack) {
+          await videoTrack.setDeviceId(deviceId);
+          setSelectedVideoInput(deviceId);
+        } else {
+          alert("No video track found. Please enable your camera first.");
+        }
+      } catch (error) {
+        logger.error("Failed to switch video input device", error as Error);
+        alert("Failed to switch camera. Please try again.");
+      }
+    },
+    [getVideoTrack]
+  );
+
+  // Apply audio processing settings
   const applyAudioProcessing = useCallback(
     async (updates: {
       echoCancellation?: boolean;
@@ -108,70 +595,33 @@ export function AudioVideoSettings() {
     }) => {
       // Always update settings
       updateSettings(updates);
-
-      // If connected, apply to track
-      if (isConnected && room?.localParticipant) {
-        try {
-          setIsApplying(true);
-          const micPub = room.localParticipant.getTrackPublication(
-            Track.Source.Microphone
-          );
-          if (micPub?.track) {
-            const mediaTrack = (micPub.track as LocalAudioTrack).mediaStreamTrack;
-            if (mediaTrack && "applyConstraints" in mediaTrack) {
-              await mediaTrack.applyConstraints({
-                echoCancellation: updates.echoCancellation ?? settings.echoCancellation,
-                noiseSuppression: updates.noiseSuppression ?? settings.noiseSuppression,
-                autoGainControl: updates.autoGainControl ?? settings.autoGainControl,
-              });
-              console.log("Applied audio constraints:", updates);
-            }
-          }
-        } catch (err) {
-          console.warn("Error applying audio processing:", err);
-        } finally {
-          setIsApplying(false);
-        }
-      }
+      // Track recreation will happen via useEffect
     },
-    [isConnected, room, settings, updateSettings]
+    [updateSettings]
   );
 
-  // Restart audio track to apply all settings
-  const handleRestartTrack = useCallback(async () => {
-    if (!isConnected || !room?.localParticipant) {
-      console.log("Not connected, settings will apply on next connection");
-      return;
-    }
-
-    try {
-      setIsApplying(true);
-      
-      // Disable and re-enable mic with new settings
-      await room.localParticipant.setMicrophoneEnabled(false);
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      
-      await room.localParticipant.setMicrophoneEnabled(true, {
-        deviceId: settings.selectedMicId || undefined,
-        echoCancellation: settings.echoCancellation,
-        noiseSuppression: settings.noiseSuppression,
-        autoGainControl: settings.autoGainControl,
+  // Apply output volume
+  useEffect(() => {
+    // Set volume on all audio elements (used by RoomAudioRenderer)
+    const audioElements = document.querySelectorAll("audio");
+    if (audioElements.length > 0) {
+      audioElements.forEach((audio) => {
+        audio.volume = settings.outputVolume;
       });
-      
-      console.log("Restarted audio track with new settings");
-    } catch (err) {
-      console.error("Error restarting audio track:", err);
-    } finally {
-      setIsApplying(false);
+      logger.debug("Output volume set", {
+        outputVolume: `${Math.round(settings.outputVolume * 100)}%`,
+      });
     }
-  }, [isConnected, room, settings]);
+  }, [settings.outputVolume]);
 
   // Test sound for speaker output
   const handleTestSound = () => {
-    // Create a simple beep sound
-    const AudioContextClass = getAudioContextConstructor();
+    const AudioContextClass =
+      window.AudioContext ||
+      (window as { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext;
     if (!AudioContextClass) {
-      console.warn("AudioContext not supported");
+      logger.warn("AudioContext not supported");
       return;
     }
 
@@ -199,13 +649,8 @@ export function AudioVideoSettings() {
     oscillator.stop(audioContext.currentTime + 0.2);
   };
 
-  // Mic level visualization
-  const micLevelPercent = Math.round(micLevel * 100);
-  const micLevelBars = useMemo(() => {
-    const bars = 20;
-    const filledBars = Math.round(micLevel * bars);
-    return Array.from({ length: bars }, (_, i) => i < filledBars);
-  }, [micLevel]);
+  // Check if connected to LiveKit room
+  const isConnected = !!localParticipant;
 
   return (
     <div className="space-y-6">
@@ -213,7 +658,7 @@ export function AudioVideoSettings() {
       {isConnected && (
         <div className="flex items-center gap-2 text-xs text-green-600 bg-green-50 px-3 py-2 rounded">
           <div className="size-2 rounded-full bg-green-500" />
-          Connected to LiveKit - changes apply immediately
+          Connected - changes apply immediately
         </div>
       )}
 
@@ -222,15 +667,26 @@ export function AudioVideoSettings() {
         <div className="flex items-center gap-2">
           <Mic className="size-4 text-muted-foreground" />
           <h3 className="text-sm font-semibold">Microphone</h3>
+          {isConnected && (
+            <div
+              className={`ml-auto px-2 py-0.5 rounded-full text-xs font-medium ${
+                isMicrophoneEnabled
+                  ? "bg-green-100 text-green-700"
+                  : "bg-red-100 text-red-700"
+              }`}
+            >
+              {isMicrophoneEnabled ? "On" : "Off"}
+            </div>
+          )}
         </div>
 
         {/* Microphone Device Selector */}
         <div className="space-y-2">
           <Label htmlFor="mic-device">Input Device</Label>
           <Select
-            value={settings.selectedMicId || "default"}
+            value={selectedAudioInput || settings.selectedMicId || "default"}
             onValueChange={handleMicChange}
-            disabled={isApplying}
+            disabled={isApplying || !isConnected}
           >
             <SelectTrigger id="mic-device" className="w-full min-w-0">
               <SelectValue
@@ -240,22 +696,13 @@ export function AudioVideoSettings() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="default">Default Microphone</SelectItem>
-              {inputDevices.map((device) => (
+              {audioInputDevices.map((device) => (
                 <SelectItem key={device.deviceId} value={device.deviceId}>
-                  {device.label}
+                  {device.label || `Microphone ${device.deviceId.slice(0, 8)}`}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={refreshDevices}
-            className="text-xs"
-            disabled={devicesLoading || isApplying}
-          >
-            {devicesLoading ? "Refreshing..." : "Refresh Devices"}
-          </Button>
         </div>
 
         {/* Microphone Gain Slider */}
@@ -275,55 +722,14 @@ export function AudioVideoSettings() {
             onValueChange={([value]) =>
               updateSettings({ micGain: value / 100 })
             }
+            disabled={!isConnected || !isMicrophoneEnabled}
             className="w-full"
           />
           <p className="text-xs text-muted-foreground">
-            Adjust your microphone input volume. Default: 60%
+            Adjust your microphone input volume. Minimum 10% to preserve
+            speaking detection.
           </p>
         </div>
-
-        {/* Live Mic Level Meter */}
-        {localStream && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Microphone Level</Label>
-              <span
-                className={`text-xs font-mono ${
-                  isClipping
-                    ? "text-red-500 font-semibold"
-                    : "text-muted-foreground"
-                }`}
-              >
-                {micLevelPercent}%{isClipping && " (CLIPPING)"}
-              </span>
-            </div>
-            <div className="flex gap-0.5 h-4">
-              {micLevelBars.map((filled, i) => (
-                <div
-                  key={i}
-                  className={`flex-1 rounded-sm transition-colors ${
-                    isClipping
-                      ? "bg-red-500"
-                      : i < micLevelBars.length * 0.7
-                      ? filled
-                        ? "bg-green-500"
-                        : "bg-gray-200"
-                      : i < micLevelBars.length * 0.9
-                      ? filled
-                        ? "bg-yellow-500"
-                        : "bg-gray-200"
-                      : filled
-                      ? "bg-red-500"
-                      : "bg-gray-200"
-                  }`}
-                />
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Speak into your microphone to see the level
-            </p>
-          </div>
-        )}
 
         {/* Audio Processing Toggles */}
         <div className="space-y-3 pt-2">
@@ -337,7 +743,7 @@ export function AudioVideoSettings() {
             <Switch
               id="echo-cancellation"
               checked={settings.echoCancellation}
-              disabled={isApplying}
+              disabled={isApplying || !isConnected}
               onCheckedChange={(checked) =>
                 applyAudioProcessing({ echoCancellation: checked })
               }
@@ -354,7 +760,7 @@ export function AudioVideoSettings() {
             <Switch
               id="noise-suppression"
               checked={settings.noiseSuppression}
-              disabled={isApplying}
+              disabled={isApplying || !isConnected}
               onCheckedChange={(checked) =>
                 applyAudioProcessing({ noiseSuppression: checked })
               }
@@ -371,7 +777,7 @@ export function AudioVideoSettings() {
             <Switch
               id="auto-gain"
               checked={settings.autoGainControl}
-              disabled={isApplying}
+              disabled={isApplying || !isConnected}
               onCheckedChange={(checked) =>
                 applyAudioProcessing({ autoGainControl: checked })
               }
@@ -399,11 +805,13 @@ export function AudioVideoSettings() {
             <Button
               variant="outline"
               size="sm"
-              onClick={handleRestartTrack}
+              onClick={recreateAudioTrack}
               disabled={isApplying}
               className="w-full mt-2"
             >
-              <RefreshCw className={`size-3 mr-2 ${isApplying ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`size-3 mr-2 ${isApplying ? "animate-spin" : ""}`}
+              />
               {isApplying ? "Applying..." : "Apply All Audio Settings"}
             </Button>
           )}
@@ -418,13 +826,15 @@ export function AudioVideoSettings() {
         </div>
 
         {/* Speaker Device Selector */}
-        {outputDevices.length > 0 ? (
+        {audioOutputDevices.length > 0 ? (
           <div className="space-y-2">
             <Label htmlFor="speaker-device">Output Device</Label>
             <Select
-              value={settings.selectedSpeakerId || "default"}
+              value={
+                selectedAudioOutput || settings.selectedSpeakerId || "default"
+              }
               onValueChange={handleSpeakerChange}
-              disabled={isApplying}
+              disabled={isApplying || !isConnected}
             >
               <SelectTrigger id="speaker-device" className="w-full min-w-0">
                 <SelectValue
@@ -434,13 +844,16 @@ export function AudioVideoSettings() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="default">Default Speaker</SelectItem>
-                {outputDevices.map((device) => (
+                {audioOutputDevices.map((device) => (
                   <SelectItem key={device.deviceId} value={device.deviceId}>
-                    {device.label}
+                    {device.label || `Speaker ${device.deviceId.slice(0, 8)}`}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">
+              Output device switching requires browser support (Chrome/Edge)
+            </p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -468,6 +881,7 @@ export function AudioVideoSettings() {
             onValueChange={([value]) =>
               updateSettings({ outputVolume: value / 100 })
             }
+            disabled={!isConnected}
             className="w-full"
           />
           <div className="flex items-center gap-2">
@@ -483,6 +897,133 @@ export function AudioVideoSettings() {
           </div>
         </div>
       </div>
+
+      {/* Camera Section */}
+      <div className="space-y-4 pt-4 border-t">
+        <div className="flex items-center gap-2">
+          <Video className="size-4 text-muted-foreground" />
+          <h3 className="text-sm font-semibold">Camera</h3>
+          {isConnected && (
+            <div
+              className={`ml-auto px-2 py-0.5 rounded-full text-xs font-medium ${
+                isCameraEnabled
+                  ? "bg-green-100 text-green-700"
+                  : "bg-red-100 text-red-700"
+              }`}
+            >
+              {isCameraEnabled ? "On" : "Off"}
+            </div>
+          )}
+        </div>
+
+        {/* Camera Device Selector */}
+        <div className="space-y-2">
+          <Label htmlFor="camera-device">Video Device</Label>
+          <Select
+            value={selectedVideoInput || "default"}
+            onValueChange={handleVideoChange}
+            disabled={isApplying || !isConnected || !isCameraEnabled}
+          >
+            <SelectTrigger id="camera-device" className="w-full min-w-0">
+              <SelectValue placeholder="Select camera" className="truncate" />
+            </SelectTrigger>
+            <SelectContent>
+              {videoInputDevices.map((device) => (
+                <SelectItem key={device.deviceId} value={device.deviceId}>
+                  {device.label || `Camera ${device.deviceId.slice(0, 8)}`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Resolution is automatically optimized based on your connection and
+            device capabilities.
+          </p>
+        </div>
+      </div>
     </div>
+  );
+}
+
+/**
+ * Error boundary component to catch LiveKit hook errors
+ */
+class AudioSettingsErrorBoundary extends Component<
+  { children: ReactNode; fallback: ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: ReactNode; fallback: ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    // Log error but don't show to user - we'll show fallback
+    if (error.message.includes("No room provided")) {
+      logger.debug("Not in LiveKit room context for settings");
+    } else {
+      logger.error("Error in AudioVideoSettings", error);
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
+
+/**
+ * Main export - wraps content and handles room context check
+ */
+export function AudioVideoSettings() {
+  const [liveKitToken] = useLiveKitToken();
+  const isInRoom = !!liveKitToken?.token && !!liveKitToken?.url;
+
+  const fallbackUI = (
+    <div className="space-y-6">
+      <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded">
+        <div className="size-2 rounded-full bg-amber-500" />
+        Settings require an active huddle connection
+      </div>
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Please join a huddle to access audio and video settings.
+        </p>
+      </div>
+    </div>
+  );
+
+  // If not in room, show message
+  if (!isInRoom) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded">
+          <div className="size-2 rounded-full bg-amber-500" />
+          Not connected to a huddle - join a huddle to configure audio/video
+          settings
+        </div>
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Audio and video settings are only available when you are in an
+            active huddle. Join a huddle to configure your microphone, camera,
+            and other media settings.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // If in room, render with error boundary to catch hook errors
+  // The error boundary will catch "No room provided" errors
+  return (
+    <AudioSettingsErrorBoundary fallback={fallbackUI}>
+      <AudioVideoSettingsContent />
+    </AudioSettingsErrorBoundary>
   );
 }
