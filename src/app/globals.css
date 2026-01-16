@@ -307,3 +307,17 @@ body,
 .ql-renderer .mention-current-user:hover {
   background-color: rgba(255, 243, 205, 1) !important;
 }
+
+/* Reduce list indentation for bullet and ordered lists */
+.ql-editor ul,
+.ql-editor ol,
+.ql-renderer ul,
+.ql-renderer ol {
+  padding-left: 1.2em !important;
+  margin-left: 0 !important;
+}
+
+.ql-editor li,
+.ql-renderer li {
+  padding-left: 0.3em !important;
+}
