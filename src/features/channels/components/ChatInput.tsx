@@ -55,13 +55,10 @@ export function ChatInput({ placeholder }: ChatInputProps) {
         // Upload all files (HEIC files will be converted to JPEG)
         const storageIds: Id<"_storage">[] = [];
         for (const attachment of attachments) {
-          const storageId = await uploadFile(
-            attachment,
-            async () => {
-              const url = await generateUploadUrl({ throwError: true });
-              return url ?? null;
-            }
-          );
+          const storageId = await uploadFile(attachment, async () => {
+            const url = await generateUploadUrl({ throwError: true });
+            return url ?? null;
+          });
           storageIds.push(storageId as Id<"_storage">);
         }
 

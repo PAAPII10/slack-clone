@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
+import { Id } from "./_generated/dataModel";
 
 export const current = query({
   args: {},
@@ -32,6 +33,7 @@ export const update = mutation({
     const updates: {
       name?: string;
       image?: string;
+      imageId?: Id<"_storage">;
     } = {};
 
     if (args.name !== undefined) {
@@ -44,10 +46,14 @@ export const update = mutation({
         // Type assertion needed because TypeScript doesn't allow undefined in optional fields
         updates.image = undefined;
       } else {
+        if (user.imageId) {
+          await ctx.storage.delete(user.imageId as Id<"_storage">);
+        }
         // Get the URL for the image storage ID
         const imageUrl = await ctx.storage.getUrl(args.image);
         if (imageUrl) {
           updates.image = imageUrl;
+          updates.imageId = args.image;
         }
       }
     }

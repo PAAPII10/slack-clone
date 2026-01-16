@@ -46,9 +46,11 @@ export function EditProfileDialog({
     null
   );
   const [removeImage, setRemoveImage] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const uploadPromiseRef = useRef<Promise<string> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const isPending = isUpdatingUser || isUpdatingProfile;
+  const isPending = isUpdatingUser || isUpdatingProfile || isUploadingImage;
 
   // Update fields when currentUser or userProfile changes or dialog opens
   // Note: Setting state in effect is acceptable here as we're syncing form state
@@ -72,6 +74,8 @@ export function EditProfileDialog({
       setRemoveImage(false);
       setImage(null);
       setImageStorageId(null);
+      setIsUploadingImage(false);
+      uploadPromiseRef.current = null;
     }, 0);
 
     if (fileInputRef.current) {
@@ -97,18 +101,28 @@ export function EditProfileDialog({
     }
 
     setImage(file);
+    setIsUploadingImage(true);
+
+    // Create upload promise and store it so we can await it in handleSubmit if needed
+    const uploadPromise = uploadFile(file, async () => {
+      const url = await generateUploadUrl({ throwError: true });
+      return url ?? null;
+    });
+
+    uploadPromiseRef.current = uploadPromise;
 
     try {
       // Upload image (HEIC will be converted to JPEG server-side)
-      const storageId = await uploadFile(file, async () => {
-        const url = await generateUploadUrl({ throwError: true });
-        return url ?? null;
-      });
+      const storageId = await uploadPromise;
       setImageStorageId(storageId as Id<"_storage">);
+      setIsUploadingImage(false);
+      uploadPromiseRef.current = null;
     } catch {
       toast.error("Failed to upload image");
       setImage(null);
       setImageStorageId(null);
+      setIsUploadingImage(false);
+      uploadPromiseRef.current = null;
     }
   };
 
@@ -116,6 +130,8 @@ export function EditProfileDialog({
     setImage(null);
     setImageStorageId(null);
     setRemoveImage(true);
+    setIsUploadingImage(false);
+    uploadPromiseRef.current = null;
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -132,12 +148,33 @@ export function EditProfileDialog({
       return;
     }
 
+    // Wait for image upload to complete if it's still in progress
+    let finalImageStorageId = imageStorageId;
+    if (image && !imageStorageId && uploadPromiseRef.current) {
+      try {
+        finalImageStorageId =
+          (await uploadPromiseRef.current) as Id<"_storage">;
+        setImageStorageId(finalImageStorageId);
+      } catch {
+        toast.error("Image upload failed. Please try again.");
+        return;
+      }
+    }
+
+    // If user selected an image but upload hasn't completed and there's no promise, show error
+    if (image && !finalImageStorageId && !uploadPromiseRef.current) {
+      toast.error(
+        "Image upload is required. Please wait for upload to complete."
+      );
+      return;
+    }
+
     try {
       // Update user (name and image)
       await updateUser(
         {
           name: displayName.trim(),
-          image: removeImage ? null : imageStorageId || undefined,
+          image: removeImage ? null : finalImageStorageId || undefined,
         },
         { throwError: true }
       );
@@ -289,17 +326,25 @@ export function EditProfileDialog({
                     fill
                     className="rounded-lg object-cover"
                   />
-                ) : !removeImage && currentUser?.image ? (
-                  <Avatar className="size-32 rounded-lg">
-                    <AvatarImage src={currentUser.image} />
-                    <AvatarFallback className="text-4xl rounded-lg">
-                      {displayName.charAt(0).toUpperCase() || "U"}
-                    </AvatarFallback>
-                  </Avatar>
                 ) : (
                   <Avatar className="size-32 rounded-lg">
-                    <AvatarFallback className="text-4xl rounded-lg">
-                      {displayName.charAt(0).toUpperCase() || "U"}
+                    {/* Always render AvatarImage - pass undefined src when image is removed to trigger fallback */}
+                    <AvatarImage
+                      src={
+                        !removeImage && currentUser?.image
+                          ? currentUser.image
+                          : undefined
+                      }
+                      alt={displayName || currentUser?.name || "User"}
+                    />
+                    {/* Fallback always renders - shows when AvatarImage src is undefined or fails to load */}
+                    <AvatarFallback
+                      className="text-4xl rounded-lg bg-sky-500 text-white font-semibold flex items-center justify-center"
+                      delayMs={0}
+                    >
+                      {(displayName || currentUser?.name || "U")
+                        .charAt(0)
+                        .toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                 )}
@@ -319,15 +364,24 @@ export function EditProfileDialog({
                   disabled={isPending}
                   className="w-full h-9 border-2"
                 >
-                  <ImageIcon className="size-4 mr-2" />
-                  Upload photo
+                  {isUploadingImage ? (
+                    <>
+                      <Loader className="size-4 mr-2 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <ImageIcon className="size-4 mr-2" />
+                      Upload photo
+                    </>
+                  )}
                 </Button>
                 {hasImage && (
                   <button
                     type="button"
                     onClick={handleRemoveImage}
-                    disabled={isPending}
-                    className="text-sm text-[#1264a3] hover:underline text-left"
+                    disabled={isPending || isUploadingImage}
+                    className="text-sm text-[#1264a3] hover:underline text-left disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Remove photo
                   </button>
