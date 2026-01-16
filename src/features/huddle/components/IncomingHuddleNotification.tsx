@@ -61,18 +61,22 @@ export function IncomingHuddleNotification() {
         workspaceId,
         memberId: currentMember._id,
         participantName: getUserDisplayName(caller?.user ?? {}),
-        roomId: incomingHuddle.roomId,
       },
       {
         onSuccess: (data) => {
-          logger.debug("Joined huddle from notification", { huddleId: data.huddleId });
+          logger.debug("Joined huddle from notification", {
+            huddleId: data.huddleId,
+          });
           setShowHuddleDialog(true);
           setLiveKitToken({ token: data.token, url: data.url });
           // Play join sound
           playHuddleSound("join");
         },
         onError: (error) => {
-          logger.error("Failed to join huddle from notification", error as Error);
+          logger.error(
+            "Failed to join huddle from notification",
+            error as Error
+          );
         },
       }
     );

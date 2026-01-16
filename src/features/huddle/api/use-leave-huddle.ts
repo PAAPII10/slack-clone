@@ -4,7 +4,11 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { useState, useCallback, useMemo } from "react";
 
 interface UseLeaveHuddleOptions {
-  onSuccess?: (response: { huddleId: Id<"huddles">; roomId?: string }) => void;
+  onSuccess?: (response: {
+    huddleId: Id<"huddles">;
+    roomId?: string;
+    participantsCount: number;
+  }) => void;
   onError?: (error: Error) => void;
   throwError?: boolean;
 }

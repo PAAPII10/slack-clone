@@ -1,28 +1,25 @@
 import { useQuery } from "convex/react";
-import { api } from "../../../../convex/_generated/api";
-import { Id } from "../../../../convex/_generated/dataModel";
+import { api } from "../../../../../convex/_generated/api";
+import { Id } from "../../../../../convex/_generated/dataModel";
 import { isValidConvexId } from "@/lib/utils";
-import { useLiveKitToken } from "@/features/live-kit/store/use-live-kit-token";
-import { useJoinHuddle } from "./new/use-join-huddle";
+import { useEffect, useRef } from "react";
 import { getUserDisplayName } from "@/lib/user-utils";
 import { useCurrentMember } from "@/features/members/api/use-current-member";
-import { playHuddleSound } from "@/lib/huddle-sounds";
-import { useShowHuddleDialog } from "../components/new/store/use-show-huddle-dialog";
-import { useEffect, useRef } from "react";
+import { useShowHuddleDialog } from "../../components/new/store/use-show-huddle-dialog";
+import { useLiveKitToken } from "@/features/live-kit/store/use-live-kit-token";
+import { useJoinHuddle } from "./use-join-huddle";
 import { logger } from "@/lib/logger";
 
-interface UseGetHuddleByCurrentUserProps {
+interface UseGetActiveHuddleProps {
   workspaceId: Id<"workspaces">;
 }
 
-export function useGetHuddleByCurrentUser({
-  workspaceId,
-}: UseGetHuddleByCurrentUserProps) {
+export function useGetActiveHuddle({ workspaceId }: UseGetActiveHuddleProps) {
   const [, setShowHuddleDialog] = useShowHuddleDialog();
   const [liveKitToken, setLiveKitToken] = useLiveKitToken();
   const shouldFetch = isValidConvexId(workspaceId);
   const data = useQuery(
-    api.huddles.getCurrentUserHuddle,
+    api.huddles.getCurrentMemberActiveHuddle,
     shouldFetch ? { workspaceId } : "skip"
   );
   const isLoading = data === undefined;
@@ -63,14 +60,11 @@ export function useGetHuddleByCurrentUser({
         workspaceId,
         memberId: currentMember._id,
         participantName: getUserDisplayName(currentMember.user),
-        roomId: data.roomId,
       },
       {
         onSuccess: (result) => {
           setShowHuddleDialog(true);
           setLiveKitToken({ token: result.token, url: result.url });
-          // Play join sound
-          playHuddleSound("join");
         },
         onError: (error) => {
           logger.error("Failed to join huddle", error as Error);
@@ -97,6 +91,6 @@ export function useGetHuddleByCurrentUser({
       hasAttemptedJoinRef.current = null;
     }
   }, [data]);
-
-  return { data, isLoading };
+  const hasActiveHuddle = data !== null && data !== undefined;
+  return { data, isLoading, hasActiveHuddle };
 }

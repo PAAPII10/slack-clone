@@ -25,11 +25,9 @@ import { useRouter } from "next/navigation";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { getUserDisplayName } from "@/lib/user-utils";
 import { HuddleCall } from "@/features/huddle/components/new/components/HuddleCall";
-import { ChannelHuddleCall } from "@/features/huddle/components/channel/ChannelHuddleCall";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useGetHuddleByCurrentUser } from "@/features/huddle/api/use-get-huddle-by-current-user";
-import { useGetChannelHuddleByCurrentUser } from "@/features/huddle/api/channel/use-get-channel-huddle-by-current-user";
-import { useGetChannelHuddle } from "@/features/huddle/api/channel/use-get-channel-huddle";
+import { useGetActiveHuddle } from "@/features/huddle/api/new/use-get-active-huddle";
+import { useGetChannelHuddle } from "@/features/huddle/api/use-get-channel-huddle";
 
 function ChannelItem({
   channel,
@@ -100,14 +98,9 @@ export function WorkspaceSidebar() {
 
   const { mutate: joinChannel, isPending: isJoining } = useJoinChannel();
 
-  const { data: activeHuddle, isLoading: isHuddleLoading } =
-    useGetHuddleByCurrentUser({ workspaceId });
-
-  const { data: activeChannelHuddle, isLoading: isChannelHuddleLoading } =
-    useGetChannelHuddleByCurrentUser({
-      workspaceId,
-      channelId: channelId || ("" as Id<"channels">),
-    });
+  const { data: activeHuddle, isLoading: isHuddleLoading } = useGetActiveHuddle(
+    { workspaceId }
+  );
 
   const handleJoinChannel = (channelId: Id<"channels">) => {
     joinChannel(
@@ -229,18 +222,10 @@ export function WorkspaceSidebar() {
         </div>
       </ScrollArea>
       <div className="shrink-0">
-        {/* Show channel huddle if in a channel, otherwise show regular huddle */}
-        {channelId ? (
-          <ChannelHuddleCall
-            activeHuddle={activeChannelHuddle}
-            isHuddleLoading={isChannelHuddleLoading}
-          />
-        ) : (
-          <HuddleCall
-            activeHuddle={activeHuddle}
-            isHuddleLoading={isHuddleLoading}
-          />
-        )}
+        <HuddleCall
+          activeHuddle={activeHuddle}
+          isHuddleLoading={isHuddleLoading}
+        />
       </div>
     </div>
   );

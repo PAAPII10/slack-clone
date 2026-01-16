@@ -940,6 +940,25 @@ function AudioVideoSettingsContent() {
             device capabilities.
           </p>
         </div>
+
+        {/* Start with Camera Toggle */}
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="start-with-camera">Start with Camera</Label>
+              <p className="text-xs text-muted-foreground">
+                Join huddles with camera enabled by default
+              </p>
+            </div>
+            <Switch
+              id="start-with-camera"
+              checked={settings.startWithCamera}
+              onCheckedChange={(checked) =>
+                updateSettings({ startWithCamera: checked })
+              }
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

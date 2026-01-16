@@ -119,7 +119,6 @@ export function useStartAndJoinHuddle() {
               workspaceId: props.workspaceId,
               memberId: props.memberId,
               participantName: props.participantName,
-              roomId: props.roomId,
             },
             {
               onSuccess: (data) => {

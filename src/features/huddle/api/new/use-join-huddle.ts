@@ -19,7 +19,6 @@ interface UseJoinHuddleOptions {
 interface UseJoinHuddleProps {
   workspaceId: Id<"workspaces">;
   huddleId: Id<"huddles">;
-  roomId?: string;
   memberId: Id<"members">;
   participantName: string;
 }
@@ -47,8 +46,6 @@ export function useJoinHuddle() {
 
         const response = await mutation({
           workspaceId: values.workspaceId,
-          memberId: values.memberId,
-          roomId: values.roomId,
           huddleId: values.huddleId,
         });
 

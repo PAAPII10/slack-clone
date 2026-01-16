@@ -22,13 +22,13 @@ import { getUserDisplayName } from "@/lib/user-utils";
 import { useShowHuddleDialog } from "../store/use-show-huddle-dialog";
 import { useSettingsModal } from "@/store/use-settings-modal";
 import { Id } from "../../../../../../convex/_generated/dataModel";
-import { useGetHuddleByCurrentUser } from "@/features/huddle/api/use-get-huddle-by-current-user";
+import { useGetActiveHuddle } from "@/features/huddle/api/new/use-get-active-huddle";
 import { LocalParticipant, RemoteParticipant, Track } from "livekit-client";
-import { useTracks } from "@livekit/components-react";
+import { useTracks, VideoTrack } from "@livekit/components-react";
 import { ScreenShareView } from "./ScreenShareView";
 
 type HuddleParticipant = NonNullable<
-  ReturnType<typeof useGetHuddleByCurrentUser>["data"]
+  ReturnType<typeof useGetActiveHuddle>["data"]
 >["participants"][0];
 
 /**
@@ -179,7 +179,7 @@ function getVisibleParticipants(
 }
 
 interface HuddleDialogProps {
-  activeHuddle: ReturnType<typeof useGetHuddleByCurrentUser>["data"];
+  activeHuddle: ReturnType<typeof useGetActiveHuddle>["data"];
   workspaceId: Id<"workspaces">;
   localParticipant: LocalParticipant;
   remoteParticipants: RemoteParticipant[];
@@ -233,6 +233,14 @@ export function HuddleDialog({
     screenShareTracks.some(
       (track) => track.participant.identity === localParticipant.identity
     ) || screenShareTracks.length > 0;
+
+  // Get camera tracks (filter out placeholders and muted tracks)
+  const cameraTracks = tracks.filter(
+    (track) =>
+      track.publication?.source === Track.Source.Camera &&
+      !!track.publication &&
+      !track.publication.isMuted
+  );
 
   // Derive maximized state: auto-maximize when screen sharing, but allow manual override
   const isMaximized =
@@ -313,6 +321,7 @@ export function HuddleDialog({
                 getParticipantState(participant as HuddleParticipant)
               }
               isMaximized={isMaximized}
+              isCameraEnabled={isCameraEnabled}
             />
           ) : activeHuddle.participants.length > 0 ? (
             <ParticipantGrid
@@ -320,6 +329,10 @@ export function HuddleDialog({
               currentMember={currentMember}
               getParticipantState={getParticipantState}
               isMaximized={isMaximized}
+              tracks={cameraTracks}
+              localParticipant={localParticipant}
+              remoteParticipants={remoteParticipants}
+              isCameraEnabled={isCameraEnabled}
             />
           ) : (
             <div className="flex-1 flex items-center justify-center text-gray-500">
@@ -426,6 +439,10 @@ function ParticipantGrid({
   currentMember,
   getParticipantState,
   isMaximized,
+  tracks,
+  localParticipant,
+  remoteParticipants,
+  isCameraEnabled,
 }: {
   participants: (HuddleParticipant | null)[];
   currentMember: ReturnType<typeof useCurrentMember>["data"];
@@ -435,6 +452,10 @@ function ParticipantGrid({
     isWaiting: boolean;
   };
   isMaximized: boolean;
+  tracks: ReturnType<typeof useTracks>;
+  localParticipant: LocalParticipant;
+  remoteParticipants: RemoteParticipant[];
+  isCameraEnabled: boolean;
 }) {
   const participantCount = participants.length;
   const layout = useMemo(
@@ -520,6 +541,10 @@ function ParticipantGrid({
               isMuted={state.isMuted}
               shouldSpanTwoColumns={shouldSpanTwoColumns}
               nameFontSize={layout.nameFontSize}
+              tracks={tracks}
+              localParticipant={localParticipant}
+              remoteParticipants={remoteParticipants}
+              isCameraEnabled={isCameraEnabled}
             />
           );
         })}
@@ -571,6 +596,10 @@ function ParticipantCard({
   isMuted,
   shouldSpanTwoColumns,
   nameFontSize,
+  tracks,
+  localParticipant,
+  remoteParticipants,
+  isCameraEnabled,
 }: {
   participant: HuddleParticipant;
   isYou: boolean;
@@ -579,12 +608,63 @@ function ParticipantCard({
   isMuted: boolean;
   shouldSpanTwoColumns: boolean;
   nameFontSize: string;
+  tracks: ReturnType<typeof useTracks>;
+  localParticipant: LocalParticipant;
+  remoteParticipants: RemoteParticipant[];
+  isCameraEnabled: boolean;
 }) {
   // Runtime check - should never happen due to filtering above, but TypeScript needs it
   if (!participant?.user) return null;
 
   // TypeScript now knows participant and participant.user are non-null
   const user = participant.user;
+
+  // Helper to find camera track for this participant
+  const findCameraTrack = () => {
+    const participantIdentity = isYou
+      ? localParticipant.identity
+      : participant.memberId?.toString() ||
+        participant._id?.toString() ||
+        participant.user?._id?.toString();
+
+    if (!participantIdentity) return null;
+
+    return (
+      tracks.find(
+        (track) =>
+          track.publication?.source === Track.Source.Camera &&
+          !!track.publication &&
+          !track.publication.isMuted &&
+          (track.participant.identity === participantIdentity ||
+            track.participant.identity === String(participantIdentity))
+      ) || null
+    );
+  };
+
+  // Helper to check if participant has camera enabled
+  const hasCameraEnabled = () => {
+    if (isYou) {
+      return isCameraEnabled;
+    }
+
+    // For remote participants, find LiveKit participant and check camera state
+    const liveKitParticipant = remoteParticipants.find((p) => {
+      if (participant.memberId) {
+        return (
+          p.identity === participant.memberId ||
+          p.identity === String(participant.memberId) ||
+          p.identity === participant.memberId.toString()
+        );
+      }
+      return false;
+    });
+
+    return liveKitParticipant?.isCameraEnabled ?? false;
+  };
+
+  const cameraTrack = findCameraTrack();
+  const hasCamera =
+    hasCameraEnabled() && cameraTrack && cameraTrack.publication;
 
   return (
     <div
@@ -601,17 +681,24 @@ function ParticipantCard({
         borderRadius: "8px",
       }}
     >
-      {/* Background with gradient - Google Meet/Slack style */}
+      {/* Show video track if camera is enabled, otherwise show avatar */}
       <div className="absolute inset-0 w-full h-full">
-        <Avatar className="w-full h-full rounded-lg">
-          <AvatarImage
-            src={user.image || undefined}
-            className="w-full h-full object-cover"
+        {hasCamera ? (
+          <VideoTrack
+            trackRef={cameraTrack}
+            className="w-full h-full object-cover rounded-lg"
           />
-          <AvatarFallback className="w-full h-full text-4xl font-bold bg-linear-to-br from-blue-500 via-purple-500 to-pink-500 text-white flex items-center justify-center rounded-lg shadow-inner">
-            {getUserDisplayName(user).charAt(0).toUpperCase()}
-          </AvatarFallback>
-        </Avatar>
+        ) : (
+          <Avatar className="w-full h-full rounded-lg">
+            <AvatarImage
+              src={user.image || undefined}
+              className="w-full h-full object-cover"
+            />
+            <AvatarFallback className="w-full h-full text-4xl font-bold bg-linear-to-br from-blue-500 via-purple-500 to-pink-500 text-white flex items-center justify-center rounded-lg shadow-inner">
+              {getUserDisplayName(user).charAt(0).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+        )}
       </div>
 
       {/* Loading overlay for waiting participants */}

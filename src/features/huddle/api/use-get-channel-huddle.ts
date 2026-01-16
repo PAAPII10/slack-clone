@@ -10,7 +10,7 @@ interface UseGetChannelHuddleProps {
 export function useGetChannelHuddle({ channelId }: UseGetChannelHuddleProps) {
   const shouldFetch = channelId && isValidConvexId(channelId);
   const data = useQuery(
-    api.huddles.getActiveChannelHuddleWithCount,
+    api.huddles.getMyActiveHuddleByChannelId,
     shouldFetch ? { channelId } : "skip"
   );
   const isLoading = data === undefined;

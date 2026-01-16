@@ -8,13 +8,14 @@ import { useGetChannel } from "../../api/use-get-channel";
 import { getUserDisplayName } from "@/lib/user-utils";
 import { Headphones, Loader2 } from "lucide-react";
 import { useChannelId } from "@/hooks/use-channel-id";
-import { useGetChannelHuddle } from "@/features/huddle/api/channel/use-get-channel-huddle";
 import { logger } from "@/lib/logger";
 import { cn } from "@/lib/utils";
-import { useStartAndJoinChannelHuddle } from "@/features/huddle/api/channel/use-start-and-join-channel-huddle";
-import { useShowChannelHuddleDialog } from "@/features/huddle/components/channel/store/use-show-channel-huddle-dialog";
+import { useStartAndJoinHuddle } from "@/features/huddle/api/new/use-start-and-join-huddle";
+import { useShowHuddleDialog } from "@/features/huddle/components/new/store/use-show-huddle-dialog";
 import { useLiveKitToken } from "@/features/live-kit/store/use-live-kit-token";
-import { useGetChannelHuddleParticipants } from "@/features/huddle/api/channel/use-get-channel-huddle-participants";
+import { useGetActiveChannelHuddleParticipants } from "@/features/huddle/api/new/use-active-channel-huddle-participants";
+import { playHuddleSound } from "@/lib/huddle-sounds";
+import { useJoinHuddle } from "@/features/huddle/api/new/use-join-huddle";
 
 export function ChannelHuddleJoinScreen({
   open,
@@ -26,36 +27,34 @@ export function ChannelHuddleJoinScreen({
   const workspaceId = useWorkspaceId();
   const channelId = useChannelId();
   const [, setLiveKitToken] = useLiveKitToken();
-  const [, setShowChannelHuddleDialog] = useShowChannelHuddleDialog();
+  const [, setShowHuddleDialog] = useShowHuddleDialog();
   const { data: currentMember } = useCurrentMember({ workspaceId });
   const { data: channel } = useGetChannel({
     id: channelId || ("" as Id<"channels">),
   });
 
   const {
-    data: channelHuddle,
-    isLoading: isLoadingChannelHuddle,
+    data: participants,
+    isLoading: isLoadingParticipants,
     hasActiveHuddle,
-  } = useGetChannelHuddle({
+    huddleId,
+  } = useGetActiveChannelHuddleParticipants({
     channelId,
   });
-
-  const { data: participants, isLoading: isLoadingParticipants } =
-    useGetChannelHuddleParticipants({
-      channelHuddleId: channelHuddle?.channelHuddleId,
-    });
 
   const {
     startAndJoin: startAndJoinHuddle,
     isPending: isJoiningHuddle,
     currentStep,
-  } = useStartAndJoinChannelHuddle();
+  } = useStartAndJoinHuddle();
+
+  const { mutate: joinHuddle } = useJoinHuddle();
 
   const huddleTitle = channel ? `# ${channel.name}` : "Channel Huddle";
 
   const displayParticipants =
     participants
-      ?.filter((p) => p.user && p.memberId)
+      ?.filter((p) => p && p?.user && p?.memberId)
       .map((p) => ({
         id: p.memberId,
         name: getUserDisplayName(p.user),
@@ -69,31 +68,64 @@ export function ChannelHuddleJoinScreen({
   const handleJoin = () => {
     if (!channelId || !workspaceId || !currentMember?._id) return;
 
-    startAndJoinHuddle(
-      {
-        workspaceId,
-        channelId,
-        memberId: currentMember._id,
-        participantName: currentMember.user?.name ?? "Anonymous",
-      },
-      {
-        onSuccess: (data) => {
-          setLiveKitToken({ token: data.token, url: data.url });
-          setShowChannelHuddleDialog(true);
-          logger.debug("Channel huddle started and joined successfully", {
-            channelHuddleId: data.channelHuddleId,
-          });
-          onOpenChange(false);
+    if (hasActiveHuddle && huddleId) {
+      // Immediately join the huddle
+      joinHuddle(
+        {
+          huddleId,
+          workspaceId,
+          memberId: currentMember._id,
+          participantName: getUserDisplayName(currentMember.user ?? {}),
         },
-        onError: (error, step) => {
-          logger.error(`Failed to ${step} channel huddle`, error as Error);
-          setLiveKitToken(null);
+        {
+          onSuccess: (data) => {
+            setLiveKitToken({ token: data.token, url: data.url });
+            setShowHuddleDialog(true);
+            logger.debug("Channel huddle started and joined successfully", {
+              huddleId: data.huddleId,
+            });
+            // Play join sound
+            playHuddleSound("join");
+            onOpenChange(false);
+          },
+          onError: (error) => {
+            logger.error(
+              "Failed to join huddle from notification",
+              error as Error
+            );
+          },
+        }
+      );
+    } else {
+      startAndJoinHuddle(
+        {
+          workspaceId,
+          sourceType: "channel",
+          sourceId: channelId,
+          memberId: currentMember._id,
+          participantName: currentMember.user?.name ?? "Anonymous",
         },
-      }
-    );
+        {
+          onSuccess: (data) => {
+            setLiveKitToken({ token: data.token, url: data.url });
+            setShowHuddleDialog(true);
+            logger.debug("Channel huddle started and joined successfully", {
+              huddleId: data.huddleId,
+            });
+            // Play join sound
+            playHuddleSound("join");
+            onOpenChange(false);
+          },
+          onError: (error, step) => {
+            logger.error(`Failed to ${step} channel huddle`, error as Error);
+            setLiveKitToken(null);
+          },
+        }
+      );
+    }
   };
 
-  const isLoading = isLoadingChannelHuddle || isLoadingParticipants;
+  const isLoading = isLoadingParticipants;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

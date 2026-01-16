@@ -13,6 +13,7 @@ interface HuddleAudioSettings {
   noiseSuppression: boolean; // default true
   autoGainControl: boolean; // default true
   startMuted: boolean; // default false - join huddles with mic muted
+  startWithCamera: boolean; // default false - join huddles with camera off
 }
 
 const STORAGE_KEY = "huddle-audio-settings";
@@ -25,6 +26,7 @@ const DEFAULT_SETTINGS: HuddleAudioSettings = {
   noiseSuppression: true,
   autoGainControl: true, // Enable by default for better noise handling
   startMuted: true, // Join huddles with microphone muted by default
+  startWithCamera: false, // Join huddles with camera off by default
 };
 
 // Load initial settings from localStorage

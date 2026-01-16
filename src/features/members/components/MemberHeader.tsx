@@ -8,7 +8,6 @@ import { useLeaveHuddle } from "@/features/huddle/api/use-leave-huddle";
 import { playHuddleSound } from "@/lib/huddle-sounds";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { Hint } from "@/components/Hint";
-import { useGetHuddleByCurrentUser } from "@/features/huddle/api/use-get-huddle-by-current-user";
 import { useGetConversation } from "@/features/conversation/api/use-get-conversation";
 import { useStartAndJoinHuddle } from "@/features/huddle/api/new/use-start-and-join-huddle";
 import { useCurrentMember } from "@/features/members/api/use-current-member";
@@ -17,6 +16,12 @@ import { useShowHuddleDialog } from "@/features/huddle/components/new/store/use-
 import { deleteLiveKitRoom } from "@/lib/livekit";
 import { Loader2 } from "lucide-react";
 import { logger } from "@/lib/logger";
+import { useGetActiveHuddle } from "@/features/huddle/api/new/use-get-active-huddle";
+import { useGetMember } from "../api/use-get-member";
+import { useJoinHuddle } from "@/features/huddle/api/new/use-join-huddle";
+import { useGetHuddle } from "@/features/huddle/api/new/use-get-huddle";
+import { getUserDisplayName } from "@/lib/user-utils";
+import { cn } from "@/lib/utils";
 
 interface MemberHeaderProps {
   memberName?: string;
@@ -33,19 +38,27 @@ export function MemberHeader({
 }: MemberHeaderProps) {
   const [, setShowHuddleDialog] = useShowHuddleDialog();
   const avatarFallback = memberName?.charAt(0).toUpperCase();
+  const { data: member } = useGetMember({ id: memberId });
   const isOnline = useMemberOnlineStatus({ memberId });
   const workspaceId = useWorkspaceId();
 
   const [, setLiveKitToken] = useLiveKitToken();
   const { data: currentMember } = useCurrentMember({ workspaceId });
 
-  const { data: huddle } = useGetHuddleByCurrentUser({ workspaceId });
+  const { data: huddle } = useGetActiveHuddle({ workspaceId });
+
+  const { data: memberHuddle } = useGetHuddle({
+    id: member?.activeHuddleId,
+    workspaceId,
+  });
 
   const {
     startAndJoin,
     isPending: isStartingHuddle,
     currentStep,
   } = useStartAndJoinHuddle();
+
+  const { mutate: joinHuddle } = useJoinHuddle();
 
   const { mutate: leaveHuddle } = useLeaveHuddle();
 
@@ -63,28 +76,56 @@ export function MemberHeader({
   const handleStartHuddle = () => {
     if (!memberId || !workspaceId || !currentMember?._id) return;
 
-    startAndJoin(
-      {
-        workspaceId,
-        sourceType: "dm",
-        sourceId: memberId,
-        memberId: currentMember._id,
-        participantName: memberName ?? "Anonymous",
-      },
-      {
-        onSuccess: (data) => {
-          setLiveKitToken({ token: data.token, url: data.url });
-          setShowHuddleDialog(true);
-          logger.debug("Huddle started and joined successfully", {
-            huddleId: data.huddleId,
-          });
+    // If the member is already in a huddle for this conversation, join it
+    if (memberHuddle && conversationId === memberHuddle?.conversationId) {
+      joinHuddle(
+        {
+          huddleId: memberHuddle._id,
+          workspaceId,
+          memberId: currentMember._id,
+          participantName: getUserDisplayName(currentMember.user ?? {}),
         },
-        onError: (error, step) => {
-          logger.error(`Failed to ${step} huddle`, error as Error);
-          setLiveKitToken(null);
+        {
+          onSuccess: (data) => {
+            setLiveKitToken({ token: data.token, url: data.url });
+            setShowHuddleDialog(true);
+            logger.debug("Huddle  joined successfully", {
+              huddleId: data.huddleId,
+            });
+            playHuddleSound("join");
+          },
+          onError: (error) => {
+            logger.error(
+              "Failed to join huddle from notification",
+              error as Error
+            );
+          },
+        }
+      );
+    } else {
+      startAndJoin(
+        {
+          workspaceId,
+          sourceType: "dm",
+          sourceId: memberId,
+          memberId: currentMember._id,
+          participantName: memberName ?? "Anonymous",
         },
-      }
-    );
+        {
+          onSuccess: (data) => {
+            setLiveKitToken({ token: data.token, url: data.url });
+            setShowHuddleDialog(true);
+            logger.debug("Huddle started and joined successfully", {
+              huddleId: data.huddleId,
+            });
+          },
+          onError: (error, step) => {
+            logger.error(`Failed to ${step} huddle`, error as Error);
+            setLiveKitToken(null);
+          },
+        }
+      );
+    }
   };
 
   const handleHangup = () => {
@@ -149,16 +190,34 @@ export function MemberHeader({
           </span>
         </div>
       ) : (
-        <Hint label="Start Huddle">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-sm"
-            onClick={handleStartHuddle}
-            disabled={isStartingHuddle}
-          >
-            <Phone className="size-4" />
-          </Button>
+        <Hint
+          label={
+            conversationId === memberHuddle?.conversationId
+              ? "Join Huddle"
+              : member?.activeHuddleId
+              ? "Already in a huddle"
+              : "Start Huddle"
+          }
+        >
+          <span className="inline-block">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "text-sm",
+                conversationId === memberHuddle?.conversationId &&
+                  "bg-green-500/10 hover:bg-green-500/20 text-green-600 hover:text-green-700"
+              )}
+              onClick={handleStartHuddle}
+              disabled={
+                isStartingHuddle ||
+                (!!member?.activeHuddleId &&
+                  conversationId !== memberHuddle?.conversationId)
+              }
+            >
+              <Phone className="size-4" />
+            </Button>
+          </span>
         </Hint>
       )}
     </div>

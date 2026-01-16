@@ -9,7 +9,6 @@
  */
 
 import type * as auth from "../auth.js";
-import type * as channelHuddles from "../channelHuddles.js";
 import type * as channels from "../channels.js";
 import type * as conversations from "../conversations.js";
 import type * as http from "../http.js";
@@ -34,7 +33,6 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
-  channelHuddles: typeof channelHuddles;
   channels: typeof channels;
   conversations: typeof conversations;
   http: typeof http;

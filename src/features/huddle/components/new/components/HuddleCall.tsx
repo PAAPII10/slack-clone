@@ -1,6 +1,6 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { useGetHuddleByCurrentUser } from "@/features/huddle/api/use-get-huddle-by-current-user";
+import { useGetActiveHuddle } from "@/features/huddle/api/new/use-get-active-huddle";
 import { useLeaveHuddle } from "@/features/huddle/api/use-leave-huddle";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { playHuddleSound } from "@/lib/huddle-sounds";
@@ -40,14 +40,14 @@ import { useSettingsModal } from "@/store/use-settings-modal";
 import { logger } from "@/lib/logger";
 
 interface HuddleCallProps {
-  activeHuddle: ReturnType<typeof useGetHuddleByCurrentUser>["data"];
+  activeHuddle: ReturnType<typeof useGetActiveHuddle>["data"];
   isHuddleLoading: boolean;
 }
 
 export function HuddleCall({ activeHuddle, isHuddleLoading }: HuddleCallProps) {
   const workspaceId = useWorkspaceId();
 
-  const [liveKitToken] = useLiveKitToken();
+  const [liveKitToken, setLiveKitToken] = useLiveKitToken();
 
   const { mutate: leaveHuddle } = useLeaveHuddle();
   // Only render LiveKit components when we have a token (inside LiveKitRoom context)
@@ -60,10 +60,11 @@ export function HuddleCall({ activeHuddle, isHuddleLoading }: HuddleCallProps) {
 
     leaveHuddle(activeHuddle._id, {
       onSuccess: (data) => {
-        if (data.roomId) {
+        if (data.roomId && data.participantsCount === 0) {
           deleteLiveKitRoom(data.roomId);
-          playHuddleSound("hangup");
         }
+        setLiveKitToken(null);
+        playHuddleSound("hangup");
       },
     });
   };
@@ -81,7 +82,7 @@ export function HuddleCall({ activeHuddle, isHuddleLoading }: HuddleCallProps) {
 }
 
 interface HuddleCallUIProps {
-  activeHuddle: ReturnType<typeof useGetHuddleByCurrentUser>["data"];
+  activeHuddle: ReturnType<typeof useGetActiveHuddle>["data"];
   workspaceId: Id<"workspaces">;
   onLeaveHuddle: () => void;
 }
@@ -115,6 +116,14 @@ function HuddleCallUI({
       !!track.publication
   );
 
+  // Get camera tracks (filter out placeholders)
+  const cameraTracks = tracks.filter(
+    (track) =>
+      track.publication?.source === Track.Source.Camera &&
+      !!track.publication &&
+      !track.publication.isMuted
+  );
+
   const isScreenSharing = screenShareTracks.some(
     (track) => track.participant.identity === localParticipant.identity
   );
@@ -124,6 +133,56 @@ function HuddleCallUI({
     screenShareTracks.find(
       (track) => track.participant.identity === localParticipant.identity
     ) || screenShareTracks[0];
+
+  // Helper to find camera track for a participant
+  const findCameraTrack = (
+    participant: (typeof activeHuddle.participants)[0]
+  ) => {
+    if (!participant) return null;
+
+    const isYou = participant.memberId === currentMember?._id;
+    const participantIdentity = isYou
+      ? localParticipant.identity
+      : participant.memberId?.toString() ||
+        participant._id?.toString() ||
+        participant.user?._id?.toString();
+
+    if (!participantIdentity) return null;
+
+    return (
+      cameraTracks.find(
+        (track) =>
+          track.participant.identity === participantIdentity ||
+          track.participant.identity === String(participantIdentity)
+      ) || null
+    );
+  };
+
+  // Helper to check if participant has camera enabled
+  const hasCameraEnabled = (
+    participant: (typeof activeHuddle.participants)[0]
+  ) => {
+    if (!participant) return false;
+
+    const isYou = participant.memberId === currentMember?._id;
+    if (isYou) {
+      return isCameraEnabled;
+    }
+
+    // For remote participants, find LiveKit participant and check camera state
+    const liveKitParticipant = remoteParticipants.find((p) => {
+      if (participant.memberId) {
+        return (
+          p.identity === participant.memberId ||
+          p.identity === String(participant.memberId) ||
+          p.identity === participant.memberId.toString()
+        );
+      }
+      return false;
+    });
+
+    return liveKitParticipant?.isCameraEnabled ?? false;
+  };
 
   // Toggle microphone
   const toggleMute = async () => {
@@ -386,46 +445,58 @@ function HuddleCallUI({
                 const state = getParticipantState(participant);
                 const isActiveSpeaker = state.isSpeaking;
                 const isWaiting = state.isWaiting;
+                const cameraTrack = findCameraTrack(participant);
+                const hasCamera = hasCameraEnabled(participant) && cameraTrack;
+
                 return (
-                  <div key={participant._id} className="relative">
-                    <Avatar
-                      className={cn(
-                        "size-12 rounded-lg shadow-md transition-all",
-                        isActiveSpeaker &&
-                          "ring-2 ring-blue-400 ring-offset-2 ring-offset-transparent",
-                        isWaiting && "opacity-50"
-                      )}
-                      title={
-                        participant.user.name +
-                        (participant.role === "host" ? " (Host)" : "") +
-                        (isActiveSpeaker ? " (Speaking)" : "") +
-                        (state.isMuted ? " (Muted)" : "") +
-                        (isWaiting ? " (Joining...)" : "")
-                      }
-                    >
-                      <AvatarImage
-                        src={participant.user.image || undefined}
-                        alt={
-                          participant.user.name ||
-                          participant.user.displayName ||
-                          participant.user.fullName ||
-                          undefined
-                        }
-                        className="rounded-lg"
+                  <div
+                    key={participant._id}
+                    className={cn(
+                      "relative size-12 rounded-lg shadow-md transition-all overflow-hidden",
+                      isActiveSpeaker &&
+                        "ring-2 ring-blue-400 ring-offset-2 ring-offset-transparent",
+                      isWaiting && "opacity-50"
+                    )}
+                    title={
+                      participant.user.name +
+                      (participant.role === "host" ? " (Host)" : "") +
+                      (isActiveSpeaker ? " (Speaking)" : "") +
+                      (state.isMuted ? " (Muted)" : "") +
+                      (isWaiting ? " (Joining...)" : "")
+                    }
+                  >
+                    {/* Show video track if camera is enabled, otherwise show avatar */}
+                    {hasCamera && cameraTrack && cameraTrack.publication ? (
+                      <VideoTrack
+                        trackRef={cameraTrack}
+                        className="w-full h-full object-cover rounded-lg"
                       />
-                      <AvatarFallback className="rounded-lg bg-linear-to-br from-sky-400 to-purple-500 text-xl font-bold text-white">
-                        {getUserDisplayName(participant.user)
-                          .charAt(0)
-                          .toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
+                    ) : (
+                      <Avatar className="w-full h-full rounded-lg">
+                        <AvatarImage
+                          src={participant.user.image || undefined}
+                          alt={
+                            participant.user.name ||
+                            participant.user.displayName ||
+                            participant.user.fullName ||
+                            undefined
+                          }
+                          className="rounded-lg"
+                        />
+                        <AvatarFallback className="rounded-lg bg-linear-to-br from-sky-400 to-purple-500 text-xl font-bold text-white">
+                          {getUserDisplayName(participant.user)
+                            .charAt(0)
+                            .toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                    )}
                     {isWaiting && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg">
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg z-10">
                         <Loader2 className="size-5 text-white animate-spin" />
                       </div>
                     )}
                     {state.isMuted && !isWaiting && (
-                      <div className="absolute -bottom-1 -right-1 bg-red-500 rounded-full p-1">
+                      <div className="absolute -bottom-1 -right-1 bg-red-500 rounded-full p-1 z-10">
                         <MicOff className="size-3 text-white" />
                       </div>
                     )}

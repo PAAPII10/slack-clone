@@ -1,11 +1,13 @@
 import { LiveKitRoom } from "@livekit/components-react";
 import { useLiveKitToken } from "../store/use-live-kit-token";
+import { useHuddleAudioSettings } from "@/features/huddle/hooks/use-huddle-audio-settings";
 
 export function LiveKitRoomProvider({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const { settings } = useHuddleAudioSettings();
   const [liveKitToken, setLiveKitToken] = useLiveKitToken();
 
   const handleDisconnect = () => {
@@ -17,8 +19,8 @@ export function LiveKitRoomProvider({
   return (
     <LiveKitRoom
       key="livekit-room-provider"
-      video={true}
-      audio={true}
+      video={settings.startWithCamera}
+      audio={!settings.startMuted}
       token={liveKitToken?.token || ""}
       serverUrl={liveKitToken?.url || ""}
       data-lk-theme="default"

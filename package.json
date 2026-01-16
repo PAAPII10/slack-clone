@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "compile": "tsc --noEmit",
+    "compile:watch": "tsc --noEmit --watch"
   },
   "dependencies": {
     "@auth/core": "0.37.0",

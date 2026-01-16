@@ -11,16 +11,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getUserDisplayName } from "@/lib/user-utils";
 import { useCurrentMember } from "@/features/members/api/use-current-member";
 import { Id } from "../../../../../../convex/_generated/dataModel";
-import { useGetHuddleByCurrentUser } from "@/features/huddle/api/use-get-huddle-by-current-user";
+import { useGetActiveHuddle } from "@/features/huddle/api/new/use-get-active-huddle";
 import { MicOff, Volume2, Loader2 } from "lucide-react";
-import { useGetChannelHuddleByCurrentUser } from "@/features/huddle/api/channel/use-get-channel-huddle-by-current-user";
 
 type HuddleParticipant = NonNullable<
-  ReturnType<typeof useGetHuddleByCurrentUser>["data"]
->["participants"][0];
-
-type ChannelHuddleParticipant = NonNullable<
-  ReturnType<typeof useGetChannelHuddleByCurrentUser>["data"]
+  ReturnType<typeof useGetActiveHuddle>["data"]
 >["participants"][0];
 
 interface ScreenShareViewProps {
@@ -28,17 +23,16 @@ interface ScreenShareViewProps {
   localParticipant: LocalParticipant;
   remoteParticipants: RemoteParticipant[];
   activeHuddle:
-    | ReturnType<typeof useGetHuddleByCurrentUser>["data"]
-    | ReturnType<typeof useGetChannelHuddleByCurrentUser>["data"];
+    | ReturnType<typeof useGetActiveHuddle>["data"]
+    | ReturnType<typeof useGetActiveHuddle>["data"];
   workspaceId: Id<"workspaces">;
-  getParticipantState: (
-    participant: HuddleParticipant | ChannelHuddleParticipant
-  ) => {
+  getParticipantState: (participant: HuddleParticipant) => {
     isMuted: boolean;
     isSpeaking: boolean;
     isWaiting: boolean;
   };
   isMaximized?: boolean;
+  isCameraEnabled: boolean;
 }
 
 export function ScreenShareView({
@@ -49,6 +43,7 @@ export function ScreenShareView({
   workspaceId,
   getParticipantState,
   isMaximized = false,
+  isCameraEnabled,
 }: ScreenShareViewProps) {
   const { data: currentMember } = useCurrentMember({ workspaceId });
 
@@ -59,6 +54,14 @@ export function ScreenShareView({
     (track): track is TrackReference =>
       track.publication?.source === Track.Source.ScreenShare &&
       !!track.publication // Ensure it's not a placeholder
+  );
+
+  // Get camera tracks (filter out placeholders and muted tracks)
+  const cameraTracks = tracks.filter(
+    (track) =>
+      track.publication?.source === Track.Source.Camera &&
+      !!track.publication &&
+      !track.publication.isMuted
   );
 
   // Find local and remote screen share tracks
@@ -81,6 +84,55 @@ export function ScreenShareView({
       return localParticipant;
     }
     return remoteParticipants.find((p) => p.identity === identity);
+  };
+
+  // Helper to find camera track for a participant
+  const findCameraTrack = (participant: HuddleParticipant) => {
+    if (!participant) return null;
+
+    const isYou = participant.memberId === currentMember?._id;
+    const participantIdentity = isYou
+      ? localParticipant.identity
+      : participant.memberId?.toString() ||
+        participant._id?.toString() ||
+        participant.user?._id?.toString();
+
+    if (!participantIdentity) return null;
+
+    return (
+      cameraTracks.find(
+        (track) =>
+          track.publication?.source === Track.Source.Camera &&
+          !!track.publication &&
+          !track.publication.isMuted &&
+          (track.participant.identity === participantIdentity ||
+            track.participant.identity === String(participantIdentity))
+      ) || null
+    );
+  };
+
+  // Helper to check if participant has camera enabled
+  const hasCameraEnabled = (participant: HuddleParticipant) => {
+    if (!participant) return false;
+
+    const isYou = participant.memberId === currentMember?._id;
+    if (isYou) {
+      return isCameraEnabled;
+    }
+
+    // For remote participants, find LiveKit participant and check camera state
+    const liveKitParticipant = remoteParticipants.find((p) => {
+      if (participant.memberId) {
+        return (
+          p.identity === participant.memberId ||
+          p.identity === String(participant.memberId) ||
+          p.identity === participant.memberId.toString()
+        );
+      }
+      return false;
+    });
+
+    return liveKitParticipant?.isCameraEnabled ?? false;
   };
 
   // Filter participants - prioritize active speaker in small mode
@@ -153,6 +205,9 @@ export function ScreenShareView({
                 )
               : false;
 
+            const cameraTrack = findCameraTrack(participant);
+            const hasCamera = hasCameraEnabled(participant) && cameraTrack && cameraTrack.publication;
+
             return (
               <div
                 key={participant._id}
@@ -164,19 +219,26 @@ export function ScreenShareView({
                   isWaiting && "opacity-50"
                 )}
               >
-                {/* Avatar */}
+                {/* Show video track if camera is enabled, otherwise show avatar */}
                 <div className="absolute inset-0 w-full h-full">
-                  <Avatar className="w-full h-full rounded-lg">
-                    <AvatarImage
-                      src={participant.user.image || undefined}
-                      className="w-full h-full object-cover"
+                  {hasCamera ? (
+                    <VideoTrack
+                      trackRef={cameraTrack}
+                      className="w-full h-full object-cover rounded-lg"
                     />
-                    <AvatarFallback className="w-full h-full text-2xl font-bold bg-linear-to-br from-sky-400 to-purple-500 text-white flex items-center justify-center rounded-lg">
-                      {getUserDisplayName(participant.user)
-                        .charAt(0)
-                        .toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
+                  ) : (
+                    <Avatar className="w-full h-full rounded-lg">
+                      <AvatarImage
+                        src={participant.user.image || undefined}
+                        className="w-full h-full object-cover"
+                      />
+                      <AvatarFallback className="w-full h-full text-2xl font-bold bg-linear-to-br from-sky-400 to-purple-500 text-white flex items-center justify-center rounded-lg">
+                        {getUserDisplayName(participant.user)
+                          .charAt(0)
+                          .toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
                 </div>
 
                 {/* Loading overlay */}
@@ -338,6 +400,9 @@ export function ScreenShareView({
                 )
               : false;
 
+            const cameraTrack = findCameraTrack(participant);
+            const hasCamera = hasCameraEnabled(participant) && cameraTrack && cameraTrack.publication;
+
             return (
               <div
                 key={participant._id}
@@ -348,19 +413,26 @@ export function ScreenShareView({
                   isWaiting && "opacity-50"
                 )}
               >
-                {/* Avatar */}
+                {/* Show video track if camera is enabled, otherwise show avatar */}
                 <div className="absolute inset-0 w-full h-full">
-                  <Avatar className="w-full h-full rounded-lg">
-                    <AvatarImage
-                      src={participant.user.image || undefined}
-                      className="w-full h-full object-cover"
+                  {hasCamera ? (
+                    <VideoTrack
+                      trackRef={cameraTrack}
+                      className="w-full h-full object-cover rounded-lg"
                     />
-                    <AvatarFallback className="w-full h-full text-4xl font-bold bg-linear-to-br from-sky-400 to-purple-500 text-white flex items-center justify-center rounded-lg">
-                      {getUserDisplayName(participant.user)
-                        .charAt(0)
-                        .toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
+                  ) : (
+                    <Avatar className="w-full h-full rounded-lg">
+                      <AvatarImage
+                        src={participant.user.image || undefined}
+                        className="w-full h-full object-cover"
+                      />
+                      <AvatarFallback className="w-full h-full text-4xl font-bold bg-linear-to-br from-sky-400 to-purple-500 text-white flex items-center justify-center rounded-lg">
+                        {getUserDisplayName(participant.user)
+                          .charAt(0)
+                          .toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
                 </div>
 
                 {/* Loading overlay */}

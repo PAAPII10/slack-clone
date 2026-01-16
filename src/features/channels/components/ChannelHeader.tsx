@@ -10,7 +10,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { TrashIcon, Phone } from "lucide-react";
+import { TrashIcon, Phone, Loader2 } from "lucide-react";
 import { FaChevronDown } from "react-icons/fa";
 import { useUpdateChannel } from "../api/use-update-channel";
 import { useRemoveChannel } from "../api/use-remove-channel";
@@ -22,8 +22,8 @@ import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { useCurrentMember } from "@/features/members/api/use-current-member";
 import { ChannelMembers } from "./ChannelMembers";
 import { Hint } from "@/components/Hint";
-import { useGetChannelHuddle } from "@/features/huddle/api/channel/use-get-channel-huddle";
 import { ChannelHuddleJoinScreen } from "../new/components/ChannelHuddleJoinScreen";
+import { useGetActiveChannelHuddleParticipants } from "@/features/huddle/api/new/use-active-channel-huddle-participants";
 
 interface ChannelHeaderProps {
   title: string;
@@ -46,7 +46,13 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
   });
 
   const { data: member } = useCurrentMember({ workspaceId });
-  const { data: channelHuddle, hasActiveHuddle } = useGetChannelHuddle({
+
+  const {
+    data: participants,
+    isLoading: isLoadingParticipants,
+    hasActiveHuddle,
+    huddleId,
+  } = useGetActiveChannelHuddleParticipants({
     channelId,
   });
 
@@ -234,10 +240,14 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
         </Dialog>
       </div>
       <div className="flex items-center gap-1">
-        {hasActiveHuddle && channelHuddle ? (
+        {isLoadingParticipants ? (
+          <Button variant="ghost" size="sm" className="text-sm" disabled>
+            <Loader2 className="size-4 animate-spin" />
+          </Button>
+        ) : hasActiveHuddle && huddleId ? (
           <Hint
-            label={`Join Huddle (${channelHuddle.participantCount} member${
-              channelHuddle.participantCount !== 1 ? "s" : ""
+            label={`Join Huddle (${participants?.length} member${
+              participants?.length !== 1 ? "s" : ""
             })`}
           >
             <Button
@@ -247,9 +257,7 @@ export function ChannelHeader({ title, type }: ChannelHeaderProps) {
               onClick={() => setShowJoiningHuddleDialog(true)}
             >
               <Phone className="size-4 mr-1" />
-              <span className="text-xs">
-                Join ({channelHuddle.participantCount})
-              </span>
+              <span className="text-xs">Join ({participants?.length})</span>
             </Button>
           </Hint>
         ) : (

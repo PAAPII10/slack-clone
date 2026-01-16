@@ -13,6 +13,7 @@ const schema = defineSchema({
     workspaceId: v.id("workspaces"),
     userId: v.id("users"),
     role: v.union(v.literal("admin"), v.literal("member")),
+    activeHuddleId: v.optional(v.id("huddles")),
   })
     .index("by_workspace_id", ["workspaceId"])
     .index("by_user_id", ["userId"])
@@ -175,50 +176,14 @@ const schema = defineSchema({
     status: v.union(
       v.literal("waiting"),
       v.literal("joined"),
-      v.literal("left")
+      v.literal("left"),
+      v.literal("declined")
     ),
     isMuted: v.optional(v.boolean()), // Track whether participant is muted
   })
     .index("by_huddle_id", ["huddleId"])
     .index("by_member_id", ["memberId"])
     .index("by_huddle_id_member_id", ["huddleId", "memberId"]),
-  // Channel Huddles - separate schema for channel-based huddles
-  channelHuddles: defineTable({
-    channelId: v.id("channels"), // Required - channel huddles are always tied to a channel
-    workspaceId: v.id("workspaces"),
-    roomId: v.optional(v.string()), // LiveKit room ID
-    createdBy: v.id("members"), // Member who started the huddle
-    createdAt: v.number(), // When huddle was created
-    startedAt: v.number(), // When huddle actually started (when first participant joined)
-    isActive: v.boolean(), // True when huddle is active
-    endedAt: v.optional(v.number()), // When huddle ended
-    status: v.union(
-      v.literal("created"),
-      v.literal("started"),
-      v.literal("ended")
-    ),
-  })
-    .index("by_channel_id", ["channelId"])
-    .index("by_workspace_id", ["workspaceId"])
-    .index("by_channel_id_is_active", ["channelId", "isActive"]),
-  channelHuddleParticipants: defineTable({
-    channelHuddleId: v.id("channelHuddles"),
-    memberId: v.id("members"),
-    joinedAt: v.optional(v.number()), // When participant joined
-    leftAt: v.optional(v.number()), // When participant left (undefined if still active)
-    isActive: v.boolean(), // True when participant is active (leftAt is undefined)
-    role: v.union(v.literal("host"), v.literal("participant")),
-    status: v.union(
-      v.literal("waiting"),
-      v.literal("joined"),
-      v.literal("left")
-    ),
-    isMuted: v.optional(v.boolean()), // Track whether participant is muted
-  })
-    .index("by_channel_huddle_id", ["channelHuddleId"])
-    .index("by_member_id", ["memberId"])
-    .index("by_channel_huddle_id_member_id", ["channelHuddleId", "memberId"])
-    .index("by_channel_huddle_id_is_active", ["channelHuddleId", "isActive"]),
 });
 
 export default schema;
