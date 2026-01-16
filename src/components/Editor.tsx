@@ -25,8 +25,8 @@ import { Paperclip, Smile, VideoIcon, XIcon } from "lucide-react";
 import { Hint } from "./Hint";
 import { cn } from "@/lib/utils";
 import { EmojiPopover } from "./emoji-popover";
-import Image from "next/image";
 import { Id } from "../../convex/_generated/dataModel";
+import { HeicImagePreview } from "./HeicImagePreview";
 import { TypingIndicator } from "@/features/typing/components/TypingIndicator";
 import { useGetMemberBySource } from "@/features/members/api/use-get-member-by-source";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
@@ -129,7 +129,7 @@ export default function Editor({
   const onTypingStopRef = useRef(onTypingStop);
 
   const onDrop = useCallback(
-    (acceptedFiles: File[]) => {
+    async (acceptedFiles: File[]) => {
       if (acceptedFiles.length > 0 && !disabled) {
         // Validate all files
         const validFiles: File[] = [];
@@ -185,7 +185,18 @@ export default function Editor({
     onDrop,
     onDropRejected,
     accept: {
-      "image/*": [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"],
+      "image/*": [
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".svg",
+        ".heic",
+        ".heif",
+      ],
+      "image/heic": [".heic"],
+      "image/heif": [".heif"],
       "video/*": [".mp4", ".webm", ".ogg", ".mov", ".avi"],
       "application/pdf": [".pdf"],
       "application/msword": [".doc"],
@@ -457,7 +468,7 @@ export default function Editor({
     };
 
     // Handle file paste from clipboard
-    const handlePaste = (e: Event) => {
+    const handlePaste = async (e: Event) => {
       const clipboardEvent = e as ClipboardEvent;
       const items = clipboardEvent.clipboardData?.items;
       if (!items) return;
@@ -470,9 +481,12 @@ export default function Editor({
           clipboardEvent.stopPropagation();
           const blob = item.getAsFile();
           if (blob) {
-            const fileName = item.type.startsWith("image/")
-              ? `pasted-image-${Date.now()}.png`
-              : `pasted-file-${Date.now()}`;
+            const fileName =
+              item.type.startsWith("image/") ||
+              blob.type === "image/heic" ||
+              blob.type === "image/heif"
+                ? `pasted-image-${Date.now()}.png`
+                : `pasted-file-${Date.now()}`;
             const pastedFile = new File([blob], fileName, {
               type: blob.type || "application/octet-stream",
             });
@@ -696,8 +710,8 @@ export default function Editor({
                       </Hint>
                       <Hint label={file.name}>
                         {fileType === "image" ? (
-                          <Image
-                            src={URL.createObjectURL(file)}
+                          <HeicImagePreview
+                            file={file}
                             alt={file.name}
                             fill
                             className="rounded-xl overflow-hidden border object-cover"

@@ -15,9 +15,12 @@ import { useUpdateUserProfile } from "@/features/userProfiles/api/use-update-use
 import { useGetUserProfile } from "@/features/userProfiles/api/use-get-user-profile";
 import { useGenerateUploadUrl } from "@/features/upload/api/use-generate-upload-url";
 import { useCurrentUser } from "@/features/auth/api/use-current-user";
+import { isHeicFile } from "@/lib/heic-utils";
+import { uploadFile } from "@/lib/upload-utils";
 import { Loader, ImageIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Id } from "../../../../convex/_generated/dataModel";
+import { HeicImagePreview } from "@/components/HeicImagePreview";
 
 interface EditProfileDialogProps {
   open: boolean;
@@ -48,18 +51,31 @@ export function EditProfileDialog({
   const isPending = isUpdatingUser || isUpdatingProfile;
 
   // Update fields when currentUser or userProfile changes or dialog opens
+  // Note: Setting state in effect is acceptable here as we're syncing form state
+  // with external data (user profile) when dialog opens - a common pattern for forms
   useEffect(() => {
-    if (open) {
-      setFullName(userProfile?.fullName || currentUser?.name || "");
-      setDisplayName(userProfile?.displayName || currentUser?.name || "");
-      setTitle(userProfile?.title || "");
-      setPronunciation(userProfile?.pronunciation || "");
+    if (!open) return;
+
+    // Use a single state update to avoid cascading renders
+    const fullNameValue = userProfile?.fullName || currentUser?.name || "";
+    const displayNameValue =
+      userProfile?.displayName || currentUser?.name || "";
+    const titleValue = userProfile?.title || "";
+    const pronunciationValue = userProfile?.pronunciation || "";
+
+    // Batch state updates - resetting form state when dialog opens
+    setTimeout(() => {
+      setFullName(fullNameValue);
+      setDisplayName(displayNameValue);
+      setTitle(titleValue);
+      setPronunciation(pronunciationValue);
       setRemoveImage(false);
       setImage(null);
       setImageStorageId(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+    }, 0);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   }, [currentUser, userProfile, open]);
 
@@ -67,7 +83,9 @@ export function EditProfileDialog({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith("image/")) {
+    // Check if it's an image (including HEIC)
+    const isImage = file.type.startsWith("image/") || isHeicFile(file);
+    if (!isImage) {
       toast.error("Please select an image file");
       return;
     }
@@ -81,27 +99,12 @@ export function EditProfileDialog({
     setImage(file);
 
     try {
-      // Generate upload URL
-      const uploadUrl = await generateUploadUrl({ throwError: true });
-      if (!uploadUrl) {
-        throw new Error("Failed to generate upload URL");
-      }
-
-      // Upload image
-      const result = await fetch(uploadUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": file.type,
-        },
-        body: file,
+      // Upload image (HEIC will be converted to JPEG server-side)
+      const storageId = await uploadFile(file, async () => {
+        const url = await generateUploadUrl({ throwError: true });
+        return url ?? null;
       });
-
-      if (!result.ok) {
-        throw new Error("Failed to upload image");
-      }
-
-      const { storageId } = await result.json();
-      setImageStorageId(storageId);
+      setImageStorageId(storageId as Id<"_storage">);
     } catch {
       toast.error("Failed to upload image");
       setImage(null);
@@ -172,11 +175,8 @@ export function EditProfileDialog({
     onOpenChange(false);
   };
 
-  const displayImage = image
-    ? URL.createObjectURL(image)
-    : removeImage
-    ? null
-    : currentUser?.image || null;
+  // Determine if we should show the remove button
+  const hasImage = !removeImage && (image || currentUser?.image);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -281,17 +281,32 @@ export function EditProfileDialog({
               Profile photo
             </label>
             <div className="flex flex-col items-center gap-4">
-              <div className="relative">
-                <Avatar className="size-32 rounded-lg">
-                  <AvatarImage src={displayImage || undefined} />
-                  <AvatarFallback className="text-4xl rounded-lg">
-                    {displayName.charAt(0).toUpperCase() || "U"}
-                  </AvatarFallback>
-                </Avatar>
+              <div className="relative size-32 rounded-lg overflow-hidden border">
+                {image ? (
+                  <HeicImagePreview
+                    file={image}
+                    alt="Profile preview"
+                    fill
+                    className="rounded-lg object-cover"
+                  />
+                ) : !removeImage && currentUser?.image ? (
+                  <Avatar className="size-32 rounded-lg">
+                    <AvatarImage src={currentUser.image} />
+                    <AvatarFallback className="text-4xl rounded-lg">
+                      {displayName.charAt(0).toUpperCase() || "U"}
+                    </AvatarFallback>
+                  </Avatar>
+                ) : (
+                  <Avatar className="size-32 rounded-lg">
+                    <AvatarFallback className="text-4xl rounded-lg">
+                      {displayName.charAt(0).toUpperCase() || "U"}
+                    </AvatarFallback>
+                  </Avatar>
+                )}
               </div>
               <input
                 type="file"
-                accept="image/*"
+                accept="image/*,.heic,.heif"
                 ref={fileInputRef}
                 onChange={handleImageSelect}
                 className="hidden"
@@ -307,7 +322,7 @@ export function EditProfileDialog({
                   <ImageIcon className="size-4 mr-2" />
                   Upload photo
                 </Button>
-                {displayImage && (
+                {hasImage && (
                   <button
                     type="button"
                     onClick={handleRemoveImage}

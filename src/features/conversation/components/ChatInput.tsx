@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { useGenerateUploadUrl } from "@/features/upload/api/use-generate-upload-url";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { useTyping } from "@/features/typing/api/use-typing";
+import { uploadFile } from "@/lib/upload-utils";
 
 const Editor = dynamic(() => import("@/components/Editor"), { ssr: false });
 
@@ -53,29 +54,14 @@ export function ChatInput({ placeholder, conversationId }: ChatInputProps) {
       };
 
       if (attachments && attachments.length > 0) {
-        // Upload all files
+        // Upload all files (HEIC files will be converted to JPEG)
         const storageIds: Id<"_storage">[] = [];
         for (const attachment of attachments) {
-          const uploadUrl = await generateUploadUrl({ throwError: true });
-
-          if (!uploadUrl) {
-            throw new Error("Url not found");
-          }
-
-          const result = await fetch(uploadUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": attachment.type,
-            },
-            body: attachment,
-          });
-
-          if (!result.ok) {
-            throw new Error("Failed to upload file");
-          }
-
-          const { storageId } = await result.json();
-          storageIds.push(storageId);
+          const storageId = await uploadFile(
+            attachment,
+            async () => await generateUploadUrl({ throwError: true })
+          );
+          storageIds.push(storageId as Id<"_storage">);
         }
 
         values.attachments = storageIds;

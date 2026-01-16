@@ -1,6 +1,11 @@
 /* eslint-disable @next/next/no-img-element */
 
-import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { DownloadIcon, ExternalLinkIcon } from "lucide-react";
 import { MouseEvent, useEffect, useState } from "react";
 import {
@@ -12,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { formatFileSize } from "@/lib/file-utils";
 import { Hint } from "@/components/Hint";
+import { isHeicFile } from "@/lib/heic-utils";
 
 interface ThumbnailProps {
   url: string | null | undefined;
@@ -131,7 +137,8 @@ async function detectFileTypeFromContentType(
 }
 
 export function Thumbnail({ url, size }: ThumbnailProps) {
-  const [fileType, setFileType] = useState<
+  // Determine initial file type - handle HEIC files as images
+  const getInitialFileType = ():
     | "image"
     | "video"
     | "pdf"
@@ -143,26 +150,26 @@ export function Thumbnail({ url, size }: ThumbnailProps) {
     | "csv"
     | "powerpoint"
     | "zip"
-    | "other"
-  >(() => {
+    | "other" => {
     if (!url) return "other";
-    // First try to detect from URL
+    // HEIC files should already be converted server-side, but handle edge case
+    if (isHeicFile(url)) return "image";
     return getSpecificFileTypeFromUrl(url);
-  });
+  };
 
+  const [fileType, setFileType] = useState(getInitialFileType);
   const [fileSize, setFileSize] = useState<number | null>(size ?? null);
 
   useEffect(() => {
     if (!url) {
       return;
     }
+
     // If we couldn't determine from URL, detect from Content-Type
     const urlType = getSpecificFileTypeFromUrl(url);
-    if (urlType === "other") {
+    if (urlType === "other" && !isHeicFile(url)) {
       detectFileTypeFromContentType(url).then(setFileType);
     }
-    // If urlType is already known from URL, no need to update state
-    // (initial state already handles this case)
   }, [url]);
 
   // Fetch file size for non-image files if not provided from storage
@@ -211,7 +218,9 @@ export function Thumbnail({ url, size }: ThumbnailProps) {
             </div>
           </DialogTrigger>
           <DialogContent className="max-w-[800px] border-none p-0 bg-transparent shadow-none">
-            <DialogTitle className="sr-only">Image preview: {fileName}</DialogTitle>
+            <DialogTitle className="sr-only">
+              Image preview: {fileName}
+            </DialogTitle>
             <div className="relative">
               <img
                 src={url}

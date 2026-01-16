@@ -1,7 +1,14 @@
 export function getFileType(
   file: File
 ): "image" | "video" | "document" | "other" {
-  if (file.type.startsWith("image/")) {
+  // Check for HEIC/HEIF files
+  const isHeic =
+    file.type === "image/heic" ||
+    file.type === "image/heif" ||
+    file.name.toLowerCase().endsWith(".heic") ||
+    file.name.toLowerCase().endsWith(".heif");
+
+  if (file.type.startsWith("image/") || isHeic) {
     return "image";
   }
   if (file.type.startsWith("video/")) {
