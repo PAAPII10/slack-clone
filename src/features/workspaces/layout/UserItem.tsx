@@ -8,7 +8,8 @@ import { useWorkspaceId } from "@/hooks/use-workspace-id";
 import { useMemberOnlineStatus } from "@/features/presence/api/use-presence";
 import { useGetMemberHuddle } from "@/features/huddle/api/use-get-member-huddle";
 import { useIsTypingToMember } from "@/features/typing/api/use-is-typing-to-member";
-import { Headphones } from "lucide-react";
+import { Headphones, Pencil } from "lucide-react";
+import { useDraftMessages } from "@/features/messages/hooks/use-draft-messages";
 
 interface UserItemProps {
   id: Id<"members">;
@@ -68,6 +69,10 @@ export function UserItem({
   const { isInHuddle } = useGetMemberHuddle({ memberId: id });
   const isTypingToMember = useIsTypingToMember({ memberId: id });
 
+  const { getDraft } = useDraftMessages();
+  const draft = getDraft(undefined, id);
+  const hasDraft = !!draft && variant === "default";
+
   return (
     <Button
       variant="transparent"
@@ -108,19 +113,28 @@ export function UserItem({
 
         {/* Status indicators container - for headphones, draft, typing, etc. */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* Draft indicator */}
+          {hasDraft && (
+            <div title="Draft message" className="shrink-0">
+              <Pencil
+                className="size-3.5 ml-1 text-white/70"
+                aria-label="Draft message"
+              />
+            </div>
+          )}
           {/* Headphones icon if member is in active huddle */}
           {isInHuddle && (
-            <Headphones
-              className={cn(
-                "size-3.5 shrink-0",
-                isActive ? "text-[#481349]" : "text-white/70"
-              )}
-              aria-label="In huddle"
-            />
+            <div title="Active huddle" className="shrink-0">
+              <Headphones
+                className="size-3.5 ml-1 text-green-400"
+                aria-label="In huddle"
+              />
+            </div>
           )}
           {/* Typing animation icon if member is typing to current user */}
-          {isTypingToMember && !isActive && <TypingAnimationIcon isActive={isActive} />}
-          {/* TODO: Add draft icon here */}
+          {isTypingToMember && !isActive && (
+            <TypingAnimationIcon isActive={isActive} />
+          )}
         </div>
 
         {/* Unread count badge - positioned on the right like Slack */}

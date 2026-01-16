@@ -28,6 +28,7 @@ import { HuddleCall } from "@/features/huddle/components/new/components/HuddleCa
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useGetActiveHuddle } from "@/features/huddle/api/new/use-get-active-huddle";
 import { useGetChannelHuddle } from "@/features/huddle/api/use-get-channel-huddle";
+import { useDraftMessages } from "@/features/messages/hooks/use-draft-messages";
 
 function ChannelItem({
   channel,
@@ -50,6 +51,9 @@ function ChannelItem({
       channelId: channel._id,
     }
   );
+  const { getDraft } = useDraftMessages();
+  const draft = getDraft(channel._id, undefined);
+  const hasDraft = !!draft && currentChannelId !== channel._id;
 
   // Check if this channel has an active huddle
   const { hasActiveHuddle } = useGetChannelHuddle({
@@ -70,6 +74,7 @@ function ChannelItem({
       isJoining={isJoining}
       unreadCount={channel.unreadCount ?? 0}
       hasActiveHuddle={hasActiveHuddle}
+      hasDraft={hasDraft}
     />
   );
 }

@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useWorkspaceId } from "@/hooks/use-workspace-id";
-import { LucideIcon, Plus, Headphones } from "lucide-react";
+import { LucideIcon, Plus, Headphones, Pencil } from "lucide-react";
 import Link from "next/link";
 import { IconType } from "react-icons/lib";
 import { cva, type VariantProps } from "class-variance-authority";
@@ -17,6 +17,7 @@ interface SidebarItemProps {
   isJoining?: boolean;
   unreadCount?: number;
   hasActiveHuddle?: boolean;
+  hasDraft?: boolean;
 }
 
 const sidebarItemVariants = cva(
@@ -45,6 +46,7 @@ export function SidebarItem({
   isJoining,
   unreadCount = 0,
   hasActiveHuddle = false,
+  hasDraft = false,
 }: SidebarItemProps) {
   const workspaceId = useWorkspaceId();
   const hasUnread = unreadCount > 0;
@@ -67,17 +69,32 @@ export function SidebarItem({
           hasUnread && "font-semibold"
         )}
       >
-        <Link href={href ? href : `/workspace/${workspaceId}/channel/${id}`} className="flex items-center w-full">
+        <Link
+          href={href ? href : `/workspace/${workspaceId}/channel/${id}`}
+          className="flex items-center w-full"
+        >
           {/* Unread dot indicator - positioned on the left edge like Slack */}
           {hasUnread && (
             <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-1 rounded-full bg-white shrink-0" />
           )}
           <Icon className="size-3.5 mr-1 shrink-0" />
           <span className="text-sm truncate flex-1">{label}</span>
+          {/* Draft indicator - shows before huddle and unread count */}
+          {hasDraft && (
+            <div title="Draft message" className="shrink-0">
+              <Pencil
+                className="size-3.5 ml-1 text-white/70"
+                aria-label="Draft message"
+              />
+            </div>
+          )}
           {/* Active huddle indicator - shows before unread count */}
           {hasActiveHuddle && (
             <div title="Active huddle" className="shrink-0">
-              <Headphones className="size-3.5 ml-1 text-green-400" />
+              <Headphones
+                className="size-3.5 ml-1 text-green-400"
+                aria-label="In huddle"
+              />
             </div>
           )}
           {/* Unread count badge - positioned on the right like Slack */}

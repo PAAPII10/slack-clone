@@ -49,10 +49,20 @@ interface EditorProps {
   variant?: "create" | "update";
   placeholder?: string;
   defaultValue?: Delta | Op[];
+  defaultFiles?: File[];
   disabled?: boolean;
   innerRef?: RefObject<Quill | null>;
   onCancel?: () => void;
   onSubmit: ({ attachments, body, mentions }: EditorValue) => void;
+  onChange?: ({
+    delta,
+    files,
+    mentions,
+  }: {
+    delta: Delta | Op[];
+    files: File[];
+    mentions: string[];
+  }) => void;
   onTypingStart?: () => void;
   onTypingStop?: () => void;
   conversationId?: Id<"conversations">;
@@ -68,10 +78,12 @@ export default function Editor({
   variant = "create",
   placeholder = "Write a something...",
   defaultValue = [],
+  defaultFiles = [],
   disabled = false,
   innerRef,
   onCancel,
   onSubmit,
+  onChange,
   onTypingStart,
   onTypingStop,
   conversationId,
@@ -109,7 +121,7 @@ export default function Editor({
     mentionUsersRef.current = mentionUsers;
   }, [mentionUsers]);
 
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<File[]>(defaultFiles);
   const [isToolbarVisible, setIsToolbarVisible] = useState(true);
   const [hasEditorContent, setHasEditorContent] = useState(false);
   const savedSelectionRef = useRef<number | null>(null);
@@ -143,6 +155,17 @@ export default function Editor({
 
         if (validFiles.length > 0) {
           setFiles((prev) => [...prev, ...validFiles]);
+          const delta = quillRef.current?.getContents();
+          if (!delta) return;
+          // Trim leading/trailing empty lines before submitting
+          const trimmedOps = trimEmptyLinesFromOps(delta.ops || []);
+          const cleanedDelta = new Delta(trimmedOps as Op[]);
+          const mentionedUserIds = extractMentions(cleanedDelta);
+          onChange?.({
+            delta: cleanedDelta,
+            files: [...files, ...validFiles],
+            mentions: mentionedUserIds,
+          });
           // Focus the editor after files are selected
           setTimeout(() => {
             quillRef.current?.focus();
@@ -150,7 +173,7 @@ export default function Editor({
         }
       }
     },
-    [disabled]
+    [disabled, files, onChange]
   );
 
   const onDropRejected = useCallback((fileRejections: FileRejection[]) => {
@@ -421,8 +444,20 @@ export default function Editor({
 
     quill.setContents(defaultValueRef.current);
 
+    // Move cursor to end of content if there's a default value
+    const contentLength = quill.getLength();
+    if (contentLength > 1) {
+      // Set cursor to end (length - 1 to account for the trailing newline Quill adds)
+      quill.setSelection(contentLength - 1, "silent");
+    }
+
     // Phase 2: Initialize content state
     const initialDelta = quill.getContents();
+    onChange?.({
+      delta: initialDelta,
+      files: filesRef.current,
+      mentions: extractMentions(initialDelta),
+    });
     setHasEditorContent(checkHasContent(initialDelta, filesRef.current));
 
     // URL detection regex - matches http, https, www, and common domains
@@ -509,6 +544,11 @@ export default function Editor({
     // Also handle text-change to remove any images that might have been inserted
     const handleTextChange = () => {
       const delta = quill.getContents();
+      onChange?.({
+        delta,
+        files: filesRef.current,
+        mentions: extractMentions(delta),
+      });
       const hasImage = delta.ops?.some(
         (op: Op) =>
           op.insert && typeof op.insert === "object" && "image" in op.insert
@@ -631,7 +671,7 @@ export default function Editor({
         innerRef.current = null;
       }
     };
-  }, [innerRef, variant, channelId, conversationId, mentionUsers]);
+  }, [innerRef, variant, channelId, conversationId, mentionUsers, onChange]);
 
   const toggleToolbar = () => {
     setIsToolbarVisible((prev) => !prev);
