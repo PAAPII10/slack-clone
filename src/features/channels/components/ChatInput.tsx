@@ -57,7 +57,10 @@ export function ChatInput({ placeholder }: ChatInputProps) {
         for (const attachment of attachments) {
           const storageId = await uploadFile(
             attachment,
-            async () => await generateUploadUrl({ throwError: true })
+            async () => {
+              const url = await generateUploadUrl({ throwError: true });
+              return url ?? null;
+            }
           );
           storageIds.push(storageId as Id<"_storage">);
         }
