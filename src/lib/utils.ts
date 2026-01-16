@@ -1,4 +1,5 @@
 import { clsx, type ClassValue } from "clsx";
+import { Op } from "quill";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
@@ -56,4 +57,53 @@ export function isValidConvexId(value: unknown): value is string {
   const CONVEX_ID_REGEX = /^[a-zA-Z0-9_-]{17,32}$/;
 
   return CONVEX_ID_REGEX.test(value);
+}
+
+/**
+ * Simple utility to trim leading and trailing empty lines from Delta ops array
+ * Removes standalone { insert: "\n" } operations from start and end
+ */
+export function trimEmptyLinesFromOps(ops: Op[]): Op[] {
+  if (!ops.length) return [];
+
+  let start = 0;
+  let end = ops.length;
+
+  const isPureNewline = (op: Op) =>
+    typeof op.insert === "string" &&
+    op.insert.replace(/\n/g, "").trim() === "" &&
+    !op.attributes;
+
+  // Trim start
+  while (start < end && isPureNewline(ops[start])) {
+    start++;
+  }
+
+  // Trim end
+  while (end > start && isPureNewline(ops[end - 1])) {
+    end--;
+  }
+
+  const trimmed = ops.slice(start, end);
+
+  // Clean leading newline chars from first text op
+  if (trimmed.length && typeof trimmed[0].insert === "string") {
+    trimmed[0] = {
+      ...trimmed[0],
+      insert: trimmed[0].insert.replace(/^\n+/, ""),
+    };
+  }
+
+  // Clean trailing newline chars from last text op
+  const lastIndex = trimmed.length - 1;
+  if (lastIndex >= 0 && typeof trimmed[lastIndex].insert === "string") {
+    trimmed[lastIndex] = {
+      ...trimmed[lastIndex],
+      insert: trimmed[lastIndex].insert.replace(/\n+$/, ""),
+    };
+  }
+
+  return trimmed.filter(
+    (op) => !(typeof op.insert === "string" && op.insert.length === 0)
+  );
 }

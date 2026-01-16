@@ -23,7 +23,7 @@ import { Button } from "./ui/button";
 import "quill/dist/quill.snow.css";
 import { Paperclip, Smile, VideoIcon, XIcon } from "lucide-react";
 import { Hint } from "./Hint";
-import { cn } from "@/lib/utils";
+import { cn, trimEmptyLinesFromOps } from "@/lib/utils";
 import { EmojiPopover } from "./emoji-popover";
 import { Id } from "../../convex/_generated/dataModel";
 import { HeicImagePreview } from "./HeicImagePreview";
@@ -390,10 +390,15 @@ export default function Editor({
                 if (variant === "create" && onTypingStopRef.current) {
                   onTypingStopRef.current();
                 }
-                const mentionedUserIds = extractMentions(messageDelta);
+                // Trim leading/trailing empty lines before submitting
+                const trimmedOps = trimEmptyLinesFromOps(
+                  messageDelta.ops || []
+                );
+                const cleanedDelta = new Delta(trimmedOps as Op[]);
+                const mentionedUserIds = extractMentions(cleanedDelta);
                 submitRef.current?.({
                   attachments: currentFiles,
-                  body: JSON.stringify(messageDelta),
+                  body: JSON.stringify(cleanedDelta),
                   mentions: mentionedUserIds,
                 });
               },
@@ -788,10 +793,14 @@ export default function Editor({
                 size="sm"
                 onClick={() => {
                   const delta = quillRef.current?.getContents();
-                  const mentionedUserIds = extractMentions(delta);
+                  if (!delta) return;
+                  // Trim leading/trailing empty lines before submitting
+                  const trimmedOps = trimEmptyLinesFromOps(delta.ops || []);
+                  const cleanedDelta = new Delta(trimmedOps as Op[]);
+                  const mentionedUserIds = extractMentions(cleanedDelta);
                   onSubmit({
                     attachments: files,
-                    body: JSON.stringify(delta),
+                    body: JSON.stringify(cleanedDelta),
                     mentions: mentionedUserIds,
                   });
                 }}
@@ -818,10 +827,14 @@ export default function Editor({
                   onTypingStopRef.current();
                 }
                 const delta = quillRef.current?.getContents();
-                const mentionedUserIds = extractMentions(delta);
+                if (!delta) return;
+                // Trim leading/trailing empty lines before submitting
+                const trimmedOps = trimEmptyLinesFromOps(delta.ops || []);
+                const cleanedDelta = new Delta(trimmedOps as Op[]);
+                const mentionedUserIds = extractMentions(cleanedDelta);
                 onSubmit({
                   attachments: files,
-                  body: JSON.stringify(delta),
+                  body: JSON.stringify(cleanedDelta),
                   mentions: mentionedUserIds,
                 });
               }}
