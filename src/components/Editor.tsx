@@ -12,7 +12,6 @@ import {
 import { toast } from "sonner";
 import { Delta, Op } from "quill/core";
 import Quill, { QuillOptions } from "quill";
-import { Mention, MentionBlot } from "quill-mention";
 import "quill-mention/dist/quill.mention.css";
 import { useDropzone, type FileRejection } from "react-dropzone";
 
@@ -36,10 +35,7 @@ import {
   formatFileSize,
 } from "@/lib/file-utils";
 import { useChannelId } from "@/hooks/use-channel-id";
-
-// Register both the Mention module and MentionBlot
-Quill.register("modules/mention", Mention);
-Quill.register(MentionBlot);
+import "@/lib/quill-init";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
 

@@ -3,9 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Delta } from "quill/core";
 import { Id } from "../../convex/_generated/dataModel";
 import { usePanel } from "@/hooks/use-panel";
-
-// MentionBlot is already registered in Editor.tsx
-// No need to register again to avoid duplicate registration warning
+import "@/lib/quill-init";
 
 interface RendererProps {
   value: string;
@@ -39,10 +37,10 @@ function checkHasContent(delta: Delta | undefined): boolean {
   return false;
 }
 
-export default function Renderer({ 
-  value, 
+export default function Renderer({
+  value,
   currentMemberId,
-  workspaceId 
+  workspaceId,
 }: RendererProps) {
   const [isEmpty, setIsEmpty] = useState(false);
   const rendererRef = useRef<HTMLDivElement>(null);
@@ -72,42 +70,42 @@ export default function Renderer({
     // Phase 4: Style and make mentions interactive
     // Each mention element has a unique data-id attribute (member ID)
     // When clicked, we get the specific mention's ID from that element
-    const mentionElements = container.querySelectorAll('.mention[data-id]');
+    const mentionElements = container.querySelectorAll(".mention[data-id]");
     const clickHandlers: Array<() => void> = [];
-    
+
     mentionElements.forEach((mentionEl) => {
       const mentionElement = mentionEl as HTMLElement;
       // Get the member ID from this specific mention element's data attribute
-      const mentionedMemberId = mentionElement.getAttribute('data-id');
-      
+      const mentionedMemberId = mentionElement.getAttribute("data-id");
+
       if (!mentionedMemberId) return;
-      
+
       // Phase 4: Highlight mentions for current user
       // Compare: if this mention's member ID matches current user's member ID, highlight it
       if (currentMemberId && mentionedMemberId === currentMemberId) {
-        mentionElement.classList.add('mention-current-user');
+        mentionElement.classList.add("mention-current-user");
       }
-      
+
       // Add click handler to open user profile for this specific mention
       // Each mention has its own click handler with its own member ID
       if (workspaceId) {
-        mentionElement.classList.add('mention-clickable');
+        mentionElement.classList.add("mention-clickable");
         const clickHandler = (e: MouseEvent) => {
           e.preventDefault();
           e.stopPropagation();
           // Open profile for the specific member that was mentioned (this element's data-id)
           onOpenProfile(mentionedMemberId as Id<"members">);
         };
-        mentionElement.addEventListener('click', clickHandler);
+        mentionElement.addEventListener("click", clickHandler);
         clickHandlers.push(() => {
-          mentionElement.removeEventListener('click', clickHandler);
+          mentionElement.removeEventListener("click", clickHandler);
         });
       }
     });
 
     return () => {
       // Cleanup event listeners
-      clickHandlers.forEach(cleanup => cleanup());
+      clickHandlers.forEach((cleanup) => cleanup());
       if (container) {
         container.innerHTML = "";
       }
