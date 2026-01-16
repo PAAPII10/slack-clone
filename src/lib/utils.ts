@@ -95,12 +95,22 @@ export function trimEmptyLinesFromOps(ops: Op[]): Op[] {
   }
 
   // Clean trailing newline chars from last text op
+  // BUT preserve newline if it's part of a list (bullet/ordered) to maintain formatting
   const lastIndex = trimmed.length - 1;
   if (lastIndex >= 0 && typeof trimmed[lastIndex].insert === "string") {
-    trimmed[lastIndex] = {
-      ...trimmed[lastIndex],
-      insert: trimmed[lastIndex].insert.replace(/\n+$/, ""),
-    };
+    const lastOp = trimmed[lastIndex];
+    const hasListAttribute =
+      lastOp.attributes &&
+      typeof lastOp.attributes === "object" &&
+      ("list" in lastOp.attributes || "bullet" in lastOp.attributes);
+    
+    // Only remove trailing newlines if it's NOT a list item
+    if (!hasListAttribute) {
+      trimmed[lastIndex] = {
+        ...trimmed[lastIndex],
+        insert: trimmed[lastIndex].insert.replace(/\n+$/, ""),
+      };
+    }
   }
 
   return trimmed.filter(
